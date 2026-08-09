@@ -32,3 +32,16 @@ python -m ashare_quant.cli daily          # 增量更新数据并生成当日 HT
 python -m ashare_quant.cli fetch --universe all --data-root data/all --years 3
 python -m ashare_quant.cli daily --data-root data/all
 ```
+
+## 算法研究
+
+```bash
+python -m ashare_quant.cli benchmark --data-root data/all   # 算法表现对比（全市场）
+python -m ashare_quant.cli decision --data-root data/all    # 训练模型并生成当日模拟持仓
+```
+
+## 仪表盘
+
+```bash
+python -m streamlit run dashboard.py
+```
