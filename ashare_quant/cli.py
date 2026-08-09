@@ -111,6 +111,39 @@ def cmd_select(args) -> None:
     print(out.to_string(index=False))
 
 
+def cmd_simulate(args) -> None:
+    import json
+
+    from .backtest.metrics import metrics_from_returns
+    from .models.candidates import LowVolModel, MomentumModel, MultiFactorModel, ReversalModel
+    from .pipeline import build_panels
+    from .research.report import simulation_to_markdown
+    from .simulation import run_simulation
+
+    cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
+    store = ParquetStore(cfg.data_root)
+    panels = build_panels(store)
+    close, volume = panels["close"], panels["volume"]
+    open_ = pd.DataFrame({s: store.load(s)["open"] for s in close.columns}).sort_index()
+    models = {"momentum": MomentumModel(60), "reversal": ReversalModel(60),
+              "lowvol": LowVolModel(60), "multifactor": MultiFactorModel(
+                  {"volume_ratio": 0.4, "ma_deviation": 0.2, "reversal60": 0.2, "lowvol": 0.2})}
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / "adjustments.jsonl"
+    sim = run_simulation(models, close, open_, volume, top_n=cfg.top_n, log_path=log_path)
+    simulation_to_markdown(sim["summary"], sim["log"].read(), out_dir / "simulation.md")
+    (out_dir / "simulation.json").write_text(
+        json.dumps({"summary": sim["summary"].to_dict(orient="records"),
+                    "rotation_sharpe": float(metrics_from_returns(sim["rotation_returns"])["sharpe"])},
+                   ensure_ascii=False, default=str), encoding="utf-8")
+    sim["model_returns"].to_csv(out_dir / "model_returns.csv", encoding="utf-8-sig")
+    print(sim["summary"].to_string(index=False))
+    print(f"模拟盘报告已生成: {out_dir}")
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="ashare_quant", description="A股量化研究·模拟分析（研究阶段）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -130,6 +163,11 @@ def main(argv=None) -> None:
     s.add_argument("--data-root")
     s.add_argument("--out", default="docs/research/model-selection.md")
     s.set_defaults(func=cmd_select)
+    sm = sub.add_parser("simulate", help="运行模拟盘与反馈调整")
+    sm.add_argument("--config", default="config.yaml")
+    sm.add_argument("--data-root")
+    sm.add_argument("--out-dir", default="docs/simulation")
+    sm.set_defaults(func=cmd_simulate)
     args = p.parse_args(argv)
     args.func(args)
 

@@ -63,3 +63,20 @@ def screening_to_markdown(df: pd.DataFrame, path: Path) -> None:
     lines += ["", "## 说明", "",
               "训练段用于网格搜索定参，验证段为样本外检验；筛选规则为样本外夏普高于基准且回撤可控。"]
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def simulation_to_markdown(summary: pd.DataFrame, log_entries: list[dict], path: Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# 模拟盘对比报告（M4）", "",
+             "> 模拟研究，仅用于数据分析与学习，不构成投资建议。", "",
+             "## 绩效对比", "",
+             "| 模型 | 年化收益 | 年化波动 | 夏普 | 最大回撤 | 胜率 |",
+             "|---|---|---|---|---|---|"]
+    for _, r in summary.iterrows():
+        lines.append(f"| {r['model']} | {r['annual_return']:.2%} | {r['annual_vol']:.2%} | "
+                     f"{r['sharpe']:.2f} | {r['max_drawdown']:.2%} | {r['win_rate']:.2%} |")
+    lines += ["", "## 调整日志", ""]
+    for e in log_entries[-10:]:
+        lines.append(f"- {e['date']} [{e['trigger']}] {e['action']}: {e['before']} -> {e['after']}（{e['effect']}）")
+    path.write_text("\n".join(lines), encoding="utf-8")
