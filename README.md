@@ -45,3 +45,11 @@ python -m ashare_quant.cli decision --data-root data/all    # 训练模型并生
 ```bash
 python -m streamlit run dashboard.py
 ```
+
+## 成品使用（一条龙）
+
+```powershell
+.\scripts\run_all.ps1            # 数据 → 模拟盘 → 模型决策 → 仪表盘（首次全市场下载约20分钟）
+.\scripts\start_dashboard.ps1    # 只启动仪表盘
+python -m ashare_quant.cli daily --data-root data/all   # 每日：增量更新 + 报告 + 自动决策
+```

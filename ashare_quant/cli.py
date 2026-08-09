@@ -183,7 +183,13 @@ def cmd_daily(args) -> None:
           f"已最新={len(out['up_to_date'])} 失败={len(out['failed'])}")
     if out["failed"]:
         print("failed:", ",".join(out["failed"][:20]))
+    if not out.get("new_data", True) and not args.force:
+        print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）")
+        return
     _build_html_report(cfg, store, args.out_dir)
+    if not args.no_decision:
+        _save_decision(cfg, store, args.model_dir, args.sample_size,
+                       args.retrain, args.out_dir)
     print(f"当日报告已生成: {args.out_dir}/report.html")
 
 
@@ -220,17 +226,14 @@ def cmd_benchmark(args) -> None:
     print(f"算法对比报告已生成: {out}")
 
 
-def cmd_decision(args) -> None:
+def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
+                   out_dir) -> None:
     import json
 
     from .ml.decision import decide, load_models, train_and_save
-    from .ml.features import build_dataset
+    from .ml.features import build_dataset, load_feature_cache, save_feature_cache
     from .pipeline import build_panels
 
-    cfg = Config.from_yaml(Path(args.config))
-    if args.data_root:
-        cfg.data_root = Path(args.data_root)
-    store = ParquetStore(cfg.data_root)
     panels = build_panels(store)
     close, volume = panels["close"], panels["volume"]
     index_close = panels["index_close"]
@@ -239,16 +242,29 @@ def cmd_decision(args) -> None:
         idx_df = akshare_fetcher.fetch_index_daily("sh000300")
         store.save("sh000300", idx_df)
         index_close = idx_df["close"]
-    X_all, y_all = build_dataset(close, volume, index_close, horizon=20, require_target=False)
+    cache_path = Path(cfg.data_root) / "features.parquet"
+    cached = load_feature_cache(cache_path, close.index.max())
+    if cached is not None:
+        X_all, y_all = cached
+    else:
+        X_all, y_all = build_dataset(close, volume, index_close, horizon=20, require_target=False)
+        save_feature_cache(X_all, y_all, cache_path, close.index.max())
     ok = y_all.notna()
     X, y = X_all[ok], y_all[ok]
-    model_dir = Path(args.model_dir)
-    if args.retrain or not (model_dir / "meta.json").exists():
-        train_and_save(X, y, model_dir, sample_size=args.sample_size)
+    model_dir = Path(model_dir)
+    meta_path = model_dir / "meta.json"
+    need_retrain = retrain or not meta_path.exists()
+    if not need_retrain:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        trained = pd.Timestamp(meta.get("trained_on"))
+        if (pd.Timestamp.today().normalize() - trained).days > 30:
+            need_retrain = True
+    if need_retrain:
+        train_and_save(X, y, model_dir, sample_size=sample_size)
     loaded = load_models(model_dir)
     last_date = X_all.index.get_level_values("date").max()
     picks = decide(loaded, X_all, close, last_date, top_n=cfg.top_n)
-    out_dir = Path(args.out)
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "date": str(last_date.date()),
@@ -264,6 +280,17 @@ def cmd_decision(args) -> None:
     print(f"决策日期: {last_date.date()}  持仓 {len(picks)} 只")
     print(picks.head(20).to_string(index=False))
     print(f"决策已保存: {out_dir}/decision.json")
+
+
+def cmd_decision(args) -> None:
+    from .pipeline import build_panels
+
+    cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
+    store = ParquetStore(cfg.data_root)
+    _save_decision(cfg, store, args.model_dir, args.sample_size,
+                   args.retrain, args.out)
 
 
 def main(argv=None) -> None:
@@ -294,6 +321,11 @@ def main(argv=None) -> None:
     d.add_argument("--config", default="config.yaml")
     d.add_argument("--data-root")
     d.add_argument("--out-dir", default="docs/simulation")
+    d.add_argument("--model-dir", default="models")
+    d.add_argument("--sample-size", type=int, default=60000)
+    d.add_argument("--retrain", action="store_true")
+    d.add_argument("--force", action="store_true")
+    d.add_argument("--no-decision", action="store_true")
     d.set_defaults(func=cmd_daily)
     rep = sub.add_parser("report", help="仅重新生成 HTML 报告")
     rep.add_argument("--config", default="config.yaml")

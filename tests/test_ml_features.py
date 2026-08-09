@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from ashare_quant.ml.features import build_dataset
+from ashare_quant.ml.features import load_feature_cache, save_feature_cache
 
 
 def _market():
@@ -23,3 +24,14 @@ def test_build_dataset_shape_and_target():
     sample = X.index[100]
     d, s = sample
     assert abs(y.loc[sample] - (close.loc[close.index[close.index.get_loc(d) + 20], s] / close.loc[d, s] - 1)) < 1e-9
+
+
+def test_feature_cache_roundtrip(tmp_path):
+    close, volume, index_close = _market()
+    X, y = build_dataset(close, volume, index_close, horizon=20)
+    path = tmp_path / "features.parquet"
+    save_feature_cache(X, y, path, close.index.max())
+    X2, y2 = load_feature_cache(path, close.index.max())
+    assert X2 is not None and len(X2) == len(X)
+    assert list(X2.columns) == list(X.columns)
+    assert load_feature_cache(path, close.index.max() - pd.Timedelta(days=1)) is None

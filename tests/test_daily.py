@@ -40,3 +40,23 @@ def test_update_daily_appends_only_missing(tmp_path):
     assert out["new_index_date"] == "2024-01-04"
     assert out["updated"] == ["000001"]
     assert len(store.load("000001")) == 3
+
+
+def test_update_daily_fast_path_when_index_unchanged(tmp_path):
+    store = ParquetStore(tmp_path)
+    store.save("sh000300", _df(["2024-01-02", "2024-01-03"], [3000, 3010]))
+    store.save("000001", _df(["2024-01-02", "2024-01-03"], [10, 10.5]))
+    calls = []
+
+    def fake_index(symbol):
+        return _df(["2024-01-02", "2024-01-03"], [3000, 3010])
+
+    def fake_fetcher(code, start, end, adjust):
+        calls.append(code)
+        return _df(["2024-01-04"], [11.0])
+
+    cfg = Config.from_dict({"years": 1, "retry": 1})
+    out = update_daily(["000001"], store, cfg, index_fetcher=fake_index, fetcher=fake_fetcher)
+    assert out["new_data"] is False
+    assert out["up_to_date"] == "all"
+    assert calls == []

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pandas as pd
 
 
@@ -44,3 +47,27 @@ def build_dataset(close: pd.DataFrame, volume: pd.DataFrame,
     if not require_target:
         mask = X.notna().all(axis=1)
     return X[mask], target[mask]
+
+
+def save_feature_cache(X: pd.DataFrame, y: pd.Series, path: Path, as_of) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out = X.copy()
+    out["target"] = y
+    out.to_parquet(path)
+    (path.with_suffix(".meta.json")).write_text(
+        json.dumps({"as_of": str(pd.Timestamp(as_of).date()), "n_rows": int(len(X))},
+                   ensure_ascii=False), encoding="utf-8")
+
+
+def load_feature_cache(path: Path, as_of):
+    path = Path(path)
+    if not path.exists():
+        return None
+    meta = json.loads(path.with_suffix(".meta.json").read_text(encoding="utf-8"))
+    if pd.Timestamp(meta["as_of"]).date() != pd.Timestamp(as_of).date():
+        return None
+    df = pd.read_parquet(path)
+    y = df["target"]
+    X = df.drop(columns=["target"])
+    return X, y
