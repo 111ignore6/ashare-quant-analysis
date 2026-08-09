@@ -18,11 +18,11 @@ def test_normalize_maps_columns():
 def test_fetch_daily_uses_akshare(monkeypatch):
     class FakeAK:
         @staticmethod
-        def stock_zh_a_hist(symbol, period, start_date, end_date, adjust):
-            assert symbol == "000001"
+        def stock_zh_a_daily(symbol, start_date, end_date, adjust):
+            assert symbol == "sz000001"
             assert start_date == "20240101"
-            return pd.DataFrame({"日期": ["2024-01-02"], "开盘": [10], "最高": [11],
-                                 "最低": [9], "收盘": [10.5], "成交量": [1000], "成交额": [1e6]})
+            return pd.DataFrame({"date": ["2024-01-02"], "open": [10], "high": [11],
+                                 "low": [9], "close": [10.5], "volume": [1000], "amount": [1e6]})
 
     monkeypatch.setitem(sys.modules, "akshare", FakeAK())
     df = akshare_fetcher.fetch_daily("000001", "2024-01-01", "2024-01-31")

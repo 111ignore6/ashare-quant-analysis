@@ -7,6 +7,15 @@ _RENAME = {"日期": "date", "开盘": "open", "最高": "high", "最低": "low"
 _COLS = ["open", "high", "low", "close", "volume", "amount"]
 
 
+def to_sina_code(symbol: str) -> str:
+    s = str(symbol).zfill(6)
+    if s.startswith(("60", "68", "90")):
+        return "sh" + s
+    if s.startswith(("00", "30", "20")):
+        return "sz" + s
+    return "bj" + s
+
+
 def _normalize(raw: pd.DataFrame) -> pd.DataFrame:
     df = raw.rename(columns=_RENAME)
     df["date"] = pd.to_datetime(df["date"])
@@ -18,9 +27,8 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
     """返回 date 索引、open/high/low/close/volume/amount 的标准面板。"""
     import akshare as ak
 
-    raw = ak.stock_zh_a_hist(
-        symbol=symbol,
-        period="daily",
+    raw = ak.stock_zh_a_daily(
+        symbol=to_sina_code(symbol),
         start_date=str(start).replace("-", ""),
         end_date=str(end).replace("-", ""),
         adjust=adjust,
