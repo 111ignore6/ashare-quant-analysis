@@ -144,6 +144,58 @@ def cmd_simulate(args) -> None:
     print(f"模拟盘报告已生成: {out_dir}")
 
 
+def _build_html_report(cfg, store, out_dir) -> None:
+    from .models.candidates import LowVolModel, MomentumModel, MultiFactorModel, ReversalModel
+    from .pipeline import build_panels
+    from .research.factor_stats import factor_report
+    from .report.html_report import build_html_report, drawdown_figure, equity_figure, factor_heatmap
+    from .simulation import run_simulation
+
+    panels = build_panels(store)
+    close, volume = panels["close"], panels["volume"]
+    open_ = pd.DataFrame({s: store.load(s)["open"] for s in close.columns}).sort_index()
+    models = {"momentum": MomentumModel(60), "reversal": ReversalModel(60),
+              "lowvol": LowVolModel(60), "multifactor": MultiFactorModel(
+                  {"volume_ratio": 0.4, "ma_deviation": 0.2, "reversal60": 0.2, "lowvol": 0.2})}
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sim = run_simulation(models, close, open_, volume, top_n=cfg.top_n,
+                         log_path=out_dir / "adjustments.jsonl")
+    all_returns = sim["model_returns"].copy()
+    all_returns["rotation"] = sim["rotation_returns"]
+    summary = factor_report(close, volume)["ic_summary"]
+    build_html_report(equity_figure(all_returns), drawdown_figure(all_returns),
+                      factor_heatmap(summary), sim["log"].read(),
+                      data_through=str(close.index.max().date()), path=out_dir / "report.html")
+
+
+def cmd_daily(args) -> None:
+    from .daily import update_daily
+    from .universe import load_universe
+
+    cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
+    store = ParquetStore(cfg.data_root)
+    codes = load_universe(cfg.universe_mode)
+    out = update_daily(codes, store, cfg)
+    print(f"指数截止={out['new_index_date']} 更新={len(out['updated'])} "
+          f"已最新={len(out['up_to_date'])} 失败={len(out['failed'])}")
+    if out["failed"]:
+        print("failed:", ",".join(out["failed"][:20]))
+    _build_html_report(cfg, store, args.out_dir)
+    print(f"当日报告已生成: {args.out_dir}/report.html")
+
+
+def cmd_report(args) -> None:
+    cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
+    store = ParquetStore(cfg.data_root)
+    _build_html_report(cfg, store, args.out_dir)
+    print(f"报告已生成: {args.out_dir}/report.html")
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="ashare_quant", description="A股量化研究·模拟分析（研究阶段）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -168,6 +220,16 @@ def main(argv=None) -> None:
     sm.add_argument("--data-root")
     sm.add_argument("--out-dir", default="docs/simulation")
     sm.set_defaults(func=cmd_simulate)
+    d = sub.add_parser("daily", help="每日增量更新并生成报告")
+    d.add_argument("--config", default="config.yaml")
+    d.add_argument("--data-root")
+    d.add_argument("--out-dir", default="docs/simulation")
+    d.set_defaults(func=cmd_daily)
+    rep = sub.add_parser("report", help="仅重新生成 HTML 报告")
+    rep.add_argument("--config", default="config.yaml")
+    rep.add_argument("--data-root")
+    rep.add_argument("--out-dir", default="docs/simulation")
+    rep.set_defaults(func=cmd_report)
     args = p.parse_args(argv)
     args.func(args)
 
