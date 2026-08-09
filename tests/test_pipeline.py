@@ -43,3 +43,16 @@ def test_build_panels(tmp_path):
     panels = build_panels(store)
     assert panels["close"].shape == (2, 2)
     assert panels["close"].columns.tolist() == ["000001", "000002"]
+
+
+def test_download_universe_progress(capsys, tmp_path):
+    store = ParquetStore(tmp_path)
+    cfg = Config.from_dict({"years": 1, "retry": 1})
+
+    def fake_fetcher(code, start, end, adjust):
+        return _df(["2024-01-02"], [10])
+
+    download_universe(["000001", "000002", "000003"], store, cfg,
+                      fetcher=fake_fetcher, progress_every=1)
+    captured = capsys.readouterr().out
+    assert "progress 3/3" in captured

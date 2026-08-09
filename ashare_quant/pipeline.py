@@ -29,14 +29,19 @@ def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher) -> str:
 
 
 def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
-                      fetcher=None, universe_name: str = "csi300") -> dict:
+                      fetcher=None, universe_name: str = "csi300",
+                      progress_every: int = 500) -> dict:
     if fetcher is None:
         from .fetchers import akshare_fetcher
         fetcher = akshare_fetcher.fetch_daily
     counts = {"ok": [], "failed": [], "skipped": [], "no_data": []}
+    done = 0
     with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:
         futures = {ex.submit(_fetch_one, c, cfg, store, fetcher): c for c in codes}
         for fut in as_completed(futures):
+            done += 1
+            if done % progress_every == 0:
+                print(f"progress {done}/{len(codes)}")
             status = fut.result()
             counts.setdefault(status, []).append(futures[fut])
     result = {"universe": universe_name, **counts}
