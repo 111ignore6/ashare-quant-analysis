@@ -27,6 +27,8 @@ def cmd_fetch(args) -> None:
         cfg.universe_mode = args.universe
     if args.years:
         cfg.years = args.years
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
     codes = load_universe(cfg.universe_mode)
     store = ParquetStore(cfg.data_root)
     res = download_universe(codes, store, cfg, universe_name=cfg.universe_mode)
@@ -46,6 +48,8 @@ def cmd_research(args) -> None:
     from .research.report import build_report
 
     cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
     store = ParquetStore(cfg.data_root)
     panels = build_panels(store)
     close, volume = panels["close"], panels["volume"]
@@ -85,10 +89,12 @@ def main(argv=None) -> None:
     f.add_argument("--config", default="config.yaml")
     f.add_argument("--universe", choices=["csi300", "all"])
     f.add_argument("--years", type=int)
+    f.add_argument("--data-root")
     f.set_defaults(func=cmd_fetch)
     r = sub.add_parser("research", help="运行历史数据研究并生成报告")
     r.add_argument("--config", default="config.yaml")
     r.add_argument("--out", default="docs/research/data-research.md")
+    r.add_argument("--data-root")
     r.set_defaults(func=cmd_research)
     args = p.parse_args(argv)
     args.func(args)
