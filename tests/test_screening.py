@@ -48,7 +48,7 @@ def test_run_screening_returns_decisions():
     bench = close.mean(axis=1)
     out = run_screening(close, volume, bench, top_n=10)
     assert {"model", "keep", "reason"} <= set(out.columns)
-    assert "benchmark" in out["model"].tolist()
+    assert any("benchmark" in m for m in out["model"].tolist())
 
 
 def test_evaluate_metrics():

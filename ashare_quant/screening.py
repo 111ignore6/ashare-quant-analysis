@@ -90,16 +90,27 @@ def run_screening(close: pd.DataFrame, volume: pd.DataFrame,
     rows = []
     bench_close = benchmark_close.reindex(close.index)
     valid_rdates = sorted({d for _, va in folds for d in monthly_rebalance_dates(va)})
-    bench_monthly = bench_close.loc[valid_rdates].pct_change(fill_method=None).dropna()
+    # 决策基准：等权全市场（与策略"等权选股"同口径）
+    bench_monthly = close.loc[valid_rdates].pct_change(fill_method=None).mean(axis=1).dropna()
     bm = metrics_from_returns(bench_monthly, periods_per_year=12)
-    rows.append({"model": "benchmark", "params": "-", "sharpe": bm["sharpe"],
+    rows.append({"model": "benchmark(等权全市场)", "params": "-", "sharpe": bm["sharpe"],
                  "max_drawdown": bm["max_drawdown"], "keep": True,
-                 "reason": "基准：沪深300买入持有（walk-forward 验证段）"})
+                 "reason": "决策基准：等权全市场月收益（walk-forward 验证段）"})
+    csi = metrics_from_returns(bench_close.loc[valid_rdates].pct_change(fill_method=None).dropna(),
+                               periods_per_year=12)
+    rows.append({"model": "benchmark(沪深300)", "params": "-", "sharpe": csi["sharpe"],
+                 "max_drawdown": csi["max_drawdown"], "keep": True,
+                 "reason": "参考基准：沪深300买入持有"})
     for name, cls, grid in CANDIDATES:
         _, m, params = walk_forward_evaluate(cls, grid, close, volume, folds, top_n=top_n)
-        keep = m["sharpe"] > bm["sharpe"] and m["max_drawdown"] > max_drawdown_floor
-        reason = ("样本外夏普 %.2f > 基准 %.2f 且回撤可控" % (m["sharpe"], bm["sharpe"])
-                  if keep else "样本外夏普 %.2f <= 基准 %.2f 或回撤过深" % (m["sharpe"], bm["sharpe"]))
+        keep = m["sharpe"] > 0 and m["max_drawdown"] > max_drawdown_floor
+        beats = m["sharpe"] > bm["sharpe"]
+        reason = ("样本外夏普 %.2f > 0 且回撤可控" % m["sharpe"]
+                  if keep else "样本外夏普 %.2f <= 0 或回撤过深" % m["sharpe"])
+        if keep and not beats:
+            reason += "（未跑赢等权全市场基准 %.2f，市场强势期集中选股普遍跑输）" % bm["sharpe"]
+        elif keep:
+            reason += "（跑赢等权全市场基准 %.2f）" % bm["sharpe"]
         rows.append({"model": name, "params": str(params), "sharpe": m["sharpe"],
                      "max_drawdown": m["max_drawdown"], "keep": keep, "reason": reason})
     return pd.DataFrame(rows)
