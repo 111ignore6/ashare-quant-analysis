@@ -220,6 +220,50 @@ def cmd_benchmark(args) -> None:
     print(f"算法对比报告已生成: {out}")
 
 
+def cmd_decision(args) -> None:
+    import json
+
+    from .ml.decision import decide, load_models, train_and_save
+    from .ml.features import build_dataset
+    from .pipeline import build_panels
+
+    cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
+    store = ParquetStore(cfg.data_root)
+    panels = build_panels(store)
+    close, volume = panels["close"], panels["volume"]
+    index_close = panels["index_close"]
+    if index_close.empty:
+        from .fetchers import akshare_fetcher
+        idx_df = akshare_fetcher.fetch_index_daily("sh000300")
+        store.save("sh000300", idx_df)
+        index_close = idx_df["close"]
+    X, y = build_dataset(close, volume, index_close, horizon=20)
+    model_dir = Path(args.model_dir)
+    if args.retrain or not (model_dir / "meta.json").exists():
+        train_and_save(X, y, model_dir, sample_size=args.sample_size)
+    loaded = load_models(model_dir)
+    last_date = X.index.get_level_values("date").max()
+    picks = decide(loaded, X, close, last_date, top_n=cfg.top_n)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "date": str(last_date.date()),
+        "top_n": int(len(picks)),
+        "models": loaded["meta"]["models"],
+        "thresholds": loaded["meta"]["thresholds"],
+        "picks": picks.to_dict(orient="records"),
+        "disclaimer": "模拟研究，不构成投资建议",
+    }
+    (out_dir / "decision.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    picks.to_csv(out_dir / "decision.csv", index=False, encoding="utf-8-sig")
+    print(f"决策日期: {last_date.date()}  持仓 {len(picks)} 只")
+    print(picks.head(20).to_string(index=False))
+    print(f"决策已保存: {out_dir}/decision.json")
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="ashare_quant", description="A股量化研究·模拟分析（研究阶段）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -260,6 +304,14 @@ def main(argv=None) -> None:
     bm.add_argument("--out", default="docs/research/algorithm-benchmark.md")
     bm.add_argument("--with-dl", action="store_true", help="包含 GRU 深度模型")
     bm.set_defaults(func=cmd_benchmark)
+    dc = sub.add_parser("decision", help="训练模型并生成当日模拟投资决策")
+    dc.add_argument("--config", default="config.yaml")
+    dc.add_argument("--data-root")
+    dc.add_argument("--model-dir", default="models")
+    dc.add_argument("--out", default="docs/decision")
+    dc.add_argument("--sample-size", type=int, default=60000)
+    dc.add_argument("--retrain", action="store_true")
+    dc.set_defaults(func=cmd_decision)
     args = p.parse_args(argv)
     args.func(args)
 
