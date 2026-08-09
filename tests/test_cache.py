@@ -34,3 +34,18 @@ def test_missing_symbol_returns_none(tmp_path):
     store = ParquetStore(tmp_path)
     assert store.load("999999") is None
     assert not store.exists("999999")
+
+
+def test_concurrent_saves_keep_complete_manifest(tmp_path):
+    import threading
+
+    store = ParquetStore(tmp_path)
+    symbols = [f"{i:06d}" for i in range(30)]
+    threads = [threading.Thread(target=store.save, args=(s, _df(["2024-01-02"])))
+               for s in symbols]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    m = store.read_manifest()
+    assert len(m) == len(symbols)

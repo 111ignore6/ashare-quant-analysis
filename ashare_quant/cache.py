@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -15,6 +16,7 @@ class ParquetStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.manifest_path = self.root / "manifest.json"
+        self._manifest_lock = threading.Lock()
 
     def _path(self, symbol: str) -> Path:
         return self.root / f"{symbol}.parquet"
@@ -49,10 +51,11 @@ class ParquetStore:
         return json.loads(self.manifest_path.read_text(encoding="utf-8"))
 
     def update_manifest(self, symbol: str, df: pd.DataFrame) -> None:
-        m = self.read_manifest()
-        m[symbol] = {
-            "start": str(df.index.min().date()),
-            "end": str(df.index.max().date()),
-            "rows": int(len(df)),
-        }
-        self.manifest_path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+        with self._manifest_lock:
+            m = self.read_manifest()
+            m[symbol] = {
+                "start": str(df.index.min().date()),
+                "end": str(df.index.max().date()),
+                "rows": int(len(df)),
+            }
+            self.manifest_path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
