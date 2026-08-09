@@ -48,3 +48,18 @@ def build_report(results: dict, path: Path) -> None:
     lines += [f"- {c}" for c in conclusions(results)]
     lines += ["", "## 明细数据", "", "```json", results.get("raw_json", "见同目录 results.json"), "```"]
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def screening_to_markdown(df: pd.DataFrame, path: Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# 候选模型筛选报告（M3）", "",
+             "> 模拟研究，仅用于数据分析与学习，不构成投资建议。", "",
+             "## 筛选结果", ""]
+    for _, row in df.iterrows():
+        mark = "保留" if row["keep"] else "淘汰"
+        lines.append(f"- **{row['model']}**（{mark}）：夏普 {row['sharpe']:.2f}，"
+                     f"最大回撤 {row['max_drawdown']:.2%}，参数 {row['params']}。{row['reason']}")
+    lines += ["", "## 说明", "",
+              "训练段用于网格搜索定参，验证段为样本外检验；筛选规则为样本外夏普高于基准且回撤可控。"]
+    path.write_text("\n".join(lines), encoding="utf-8")

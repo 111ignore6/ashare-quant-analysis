@@ -83,6 +83,34 @@ def cmd_research(args) -> None:
     print(f"研究报告已生成: {out}")
 
 
+def cmd_select(args) -> None:
+    import json
+
+    from .pipeline import build_panels
+    from .research.report import screening_to_markdown
+    from .screening import run_screening
+
+    cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
+    store = ParquetStore(cfg.data_root)
+    panels = build_panels(store)
+    close, volume = panels["close"], panels["volume"]
+    bench = panels["index_close"]
+    if bench.empty:
+        from .fetchers import akshare_fetcher
+        idx_df = akshare_fetcher.fetch_index_daily("sh000300")
+        store.save("sh000300", idx_df)
+        bench = idx_df["close"]
+    out = run_screening(close, volume, bench, top_n=cfg.top_n)
+    target = Path(args.out)
+    screening_to_markdown(out, target)
+    (target.with_suffix(".json")).write_text(
+        json.dumps(out.to_dict(orient="records"), ensure_ascii=False, default=str), encoding="utf-8")
+    print(f"模型筛选报告已生成: {target}")
+    print(out.to_string(index=False))
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="ashare_quant", description="A股量化研究·模拟分析（研究阶段）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -97,6 +125,11 @@ def main(argv=None) -> None:
     r.add_argument("--out", default="docs/research/data-research.md")
     r.add_argument("--data-root")
     r.set_defaults(func=cmd_research)
+    s = sub.add_parser("select", help="运行候选模型筛选")
+    s.add_argument("--config", default="config.yaml")
+    s.add_argument("--data-root")
+    s.add_argument("--out", default="docs/research/model-selection.md")
+    s.set_defaults(func=cmd_select)
     args = p.parse_args(argv)
     args.func(args)
 

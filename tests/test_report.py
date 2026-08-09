@@ -25,3 +25,15 @@ def test_build_report_writes_file(tmp_path):
     build_report(_results(), out)
     text = out.read_text(encoding="utf-8")
     assert "R1" in text and "不构成投资建议" in text and "2026-08-07" in text
+
+
+def test_screening_markdown(tmp_path):
+    from ashare_quant.research.report import screening_to_markdown
+
+    df = pd.DataFrame({"model": ["benchmark", "reversal"], "params": ["-", "{'horizon': 60}"],
+                       "sharpe": [0.5, 0.8], "max_drawdown": [-0.2, -0.1],
+                       "keep": [True, True], "reason": ["基准", "样本外胜出"]})
+    out = tmp_path / "model-selection.md"
+    screening_to_markdown(df, out)
+    text = out.read_text(encoding="utf-8")
+    assert "reversal" in text and "不构成投资建议" in text
