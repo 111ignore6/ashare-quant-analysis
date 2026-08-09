@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -24,7 +25,9 @@ class ParquetStore:
     def save(self, symbol: str, df: pd.DataFrame) -> None:
         out = df.copy()
         out.index.name = "date"
-        out.to_parquet(self._path(symbol))
+        tmp = self._path(symbol).with_suffix(".parquet.tmp")
+        out.to_parquet(tmp)
+        os.replace(tmp, self._path(symbol))
         self.update_manifest(symbol, out)
 
     def load(self, symbol: str) -> pd.DataFrame | None:
