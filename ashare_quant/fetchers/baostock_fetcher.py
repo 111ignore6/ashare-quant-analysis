@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+
 import pandas as pd
 
 _COLS = ["open", "high", "low", "close", "volume", "amount"]
@@ -25,8 +27,10 @@ def rows_to_frame(fields: list[str], rows: list[list]) -> pd.DataFrame:
 def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
     import baostock as bs
 
-    bs.login()
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(30)
     try:
+        bs.login()
         rs = bs.query_history_k_data_plus(
             to_baostock_code(symbol),
             "date,open,high,low,close,volume,amount",
@@ -42,4 +46,7 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
             return pd.DataFrame(columns=_COLS)
         return rows_to_frame(rs.fields, rows)
     finally:
-        bs.logout()
+        try:
+            bs.logout()
+        finally:
+            socket.setdefaulttimeout(old_timeout)

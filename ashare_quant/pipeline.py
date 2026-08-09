@@ -9,14 +9,36 @@ from .cache import ParquetStore
 from .config import Config
 
 
-def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher) -> str:
+def _fetch_with_fallback(code: str, cfg: Config, fetcher, fallback=None) -> pd.DataFrame:
+    last_err: Exception | None = None
+    for f in (fetcher, fallback):
+        if f is None:
+            continue
+        try:
+            df = f(code, start_date_for(cfg), end_date_for(cfg), cfg.adjust)
+            if not df.empty:
+                return df
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+    if last_err is not None:
+        raise last_err
+    return pd.DataFrame()
+
+
+def start_date_for(cfg: Config) -> str:
+    return (pd.Timestamp.today().normalize() - pd.DateOffset(years=cfg.years)).strftime("%Y%m%d")
+
+
+def end_date_for(cfg: Config) -> str:
+    return pd.Timestamp.today().normalize().strftime("%Y%m%d")
+
+
+def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher, fallback=None) -> str:
     if store.exists(code):
         return "skipped"
-    start = (pd.Timestamp.today().normalize() - pd.DateOffset(years=cfg.years)).strftime("%Y%m%d")
-    end = pd.Timestamp.today().normalize().strftime("%Y%m%d")
     for attempt in range(max(1, cfg.retry)):
         try:
-            df = fetcher(code, start, end, cfg.adjust)
+            df = _fetch_with_fallback(code, cfg, fetcher, fallback)
             if df.empty:
                 return "no_data"
             store.append(code, df)
@@ -30,14 +52,17 @@ def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher) -> str:
 
 def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
                       fetcher=None, universe_name: str = "csi300",
-                      progress_every: int = 500) -> dict:
+                      progress_every: int = 500, fallback_fetcher=None) -> dict:
     if fetcher is None:
-        from .fetchers import akshare_fetcher
+        from .fetchers import akshare_fetcher, baostock_fetcher
         fetcher = akshare_fetcher.fetch_daily
+        fallback = baostock_fetcher.fetch_daily if fallback_fetcher is None else fallback_fetcher
+    else:
+        fallback = fallback_fetcher
     counts = {"ok": [], "failed": [], "skipped": [], "no_data": []}
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:
-        futures = {ex.submit(_fetch_one, c, cfg, store, fetcher): c for c in codes}
+        futures = {ex.submit(_fetch_one, c, cfg, store, fetcher, fallback): c for c in codes}
         for fut in as_completed(futures):
             done += 1
             if done % progress_every == 0:

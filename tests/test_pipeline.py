@@ -56,3 +56,18 @@ def test_download_universe_progress(capsys, tmp_path):
                       fetcher=fake_fetcher, progress_every=1)
     captured = capsys.readouterr().out
     assert "progress 3/3" in captured
+
+
+def test_download_universe_falls_back(tmp_path):
+    store = ParquetStore(tmp_path)
+    cfg = Config.from_dict({"years": 1, "retry": 1})
+
+    def broken_fetcher(code, start, end, adjust):
+        raise ConnectionError("primary down")
+
+    def backup_fetcher(code, start, end, adjust):
+        return _df(["2024-01-02"], [10])
+
+    res = download_universe(["000001"], store, cfg, fetcher=broken_fetcher, fallback_fetcher=backup_fetcher)
+    assert res["ok"] == ["000001"]
+    assert store.exists("000001")
