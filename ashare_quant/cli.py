@@ -16,8 +16,9 @@ def _calendar(cfg: Config, store: ParquetStore) -> TradingCalendar:
     if store.symbols():
         dates = sorted({d for s in store.symbols() for d in store.load(s).index})
         return TradingCalendar.from_dates(dates)
-    from .fetchers import akshare_fetcher
-    df = akshare_fetcher.fetch_index_daily("sh000300")
+    from .fetchers import resolve_fetchers
+    _, idx_fetch, _ = resolve_fetchers(cfg)
+    df = idx_fetch("sh000300")
     return TradingCalendar.from_dates(df.index)
 
 
@@ -55,8 +56,9 @@ def cmd_research(args) -> None:
     close, volume = panels["close"], panels["volume"]
     index_close = panels["index_close"]
     if index_close.empty:
-        from .fetchers import akshare_fetcher
-        idx_df = akshare_fetcher.fetch_index_daily("sh000300")
+        from .fetchers import resolve_fetchers
+        _, idx_fetch, _ = resolve_fetchers(cfg)
+        idx_df = idx_fetch("sh000300")
         store.save("sh000300", idx_df)
         index_close = idx_df["close"]
 
@@ -98,8 +100,9 @@ def cmd_select(args) -> None:
     close, volume = panels["close"], panels["volume"]
     bench = panels["index_close"]
     if bench.empty:
-        from .fetchers import akshare_fetcher
-        idx_df = akshare_fetcher.fetch_index_daily("sh000300")
+        from .fetchers import resolve_fetchers
+        _, idx_fetch, _ = resolve_fetchers(cfg)
+        idx_df = idx_fetch("sh000300")
         store.save("sh000300", idx_df)
         bench = idx_df["close"]
     out = run_screening(close, volume, bench, top_n=cfg.top_n)
@@ -221,8 +224,9 @@ def cmd_benchmark(args) -> None:
     close, volume = panels["close"], panels["volume"]
     index_close = panels["index_close"]
     if index_close.empty:
-        from .fetchers import akshare_fetcher
-        idx_df = akshare_fetcher.fetch_index_daily("sh000300")
+        from .fetchers import resolve_fetchers
+        _, idx_fetch, _ = resolve_fetchers(cfg)
+        idx_df = idx_fetch("sh000300")
         store.save("sh000300", idx_df)
         index_close = idx_df["close"]
     table, series = run_benchmark(close, volume, index_close,
@@ -246,8 +250,9 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
     close, volume = panels["close"], panels["volume"]
     index_close = panels["index_close"]
     if index_close.empty:
-        from .fetchers import akshare_fetcher
-        idx_df = akshare_fetcher.fetch_index_daily("sh000300")
+        from .fetchers import resolve_fetchers
+        _, idx_fetch, _ = resolve_fetchers(cfg)
+        idx_df = idx_fetch("sh000300")
         store.save("sh000300", idx_df)
         index_close = idx_df["close"]
     cache_path = Path(cfg.data_root) / "features.parquet"

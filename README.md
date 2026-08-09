@@ -7,10 +7,25 @@
 ## 运行
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt            # 或 pip install -e .（标准包安装）
 python -m ashare_quant.cli fetch --universe csi300 --years 3   # 下载沪深300数据
 python -m ashare_quant.cli research                            # 生成研究报告
 ```
+
+## 一键启动（日常使用）
+
+双击项目根目录的 `start.bat` 进入中文菜单，或用 PowerShell 直接指定动作：
+
+```powershell
+.\scripts\start.ps1 daily        # 每日：增量更新 + 报告 + 决策
+.\scripts\start.ps1 force        # 强制重算报告与决策
+.\scripts\start.ps1 simulate     # 模拟盘回测（含反馈调整）
+.\scripts\start.ps1 research     # 生成历史数据研究报告
+.\scripts\start.ps1 dashboard    # 启动仪表盘（http://localhost:8501）
+.\scripts\start.ps1 all          # 完整一条龙：数据→模拟→决策→仪表盘
+```
+
+计划任务仍可选用 `.\scripts\schedule_daily.ps1`（周一至五 16:05 自动运行）。
 
 ## 阶段
 
@@ -45,6 +60,21 @@ python -m ashare_quant.cli decision --data-root data/all    # 训练模型并生
 ```bash
 python -m streamlit run dashboard.py
 ```
+
+## 扩展机制（便于后续开发维护）
+
+系统提供三个可插拔注册表，新增算法/因子/数据源无需改动主流程：
+
+- **模型**：`ashare_quant/ml/models.py` 用 `@register_model("name")` 注册工厂，
+  第三方插件可通过 `[project.entry-points."ashare_quant.models"]` 自动发现；
+- **因子**：`ashare_quant/research/factors.py` 用 `@register_factor("name")` 注册，
+  签名 `(close, volume, **params)`，`compute_factors` 自动收集；
+- **数据源**：`ashare_quant/fetchers/registry.py` 用 `register_source("name", module)`
+  注册，`config.yaml` 里 `data_source` / `fallback_source` 切换主备源。
+
+内置状态：模型 7 个（linear/rf/lgbm/histgb/svm/knn/mlp）、因子 5 个
+（momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 2 个
+（akshare/baostock）。
 
 ## 成品使用（一条龙）
 

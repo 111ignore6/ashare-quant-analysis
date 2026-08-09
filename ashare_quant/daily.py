@@ -22,11 +22,11 @@ def needs_update(store: ParquetStore, index_symbol: str = "sh000300") -> bool:
 def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                  index_fetcher=None, fetcher=None, index_symbol: str = "sh000300") -> dict:
     if index_fetcher is None:
-        from .fetchers import akshare_fetcher
-        index_fetcher = akshare_fetcher.fetch_index_daily
+        from .fetchers import resolve_fetchers
+        _, index_fetcher, _ = resolve_fetchers(cfg)
     if fetcher is None:
-        from .fetchers import akshare_fetcher
-        fetcher = akshare_fetcher.fetch_daily
+        from .fetchers import resolve_fetchers
+        fetcher, _, _ = resolve_fetchers(cfg)
     manifest = store.read_manifest()
     prev_index_end = manifest.get(index_symbol, {}).get("end")
     idx_df = index_fetcher(index_symbol)

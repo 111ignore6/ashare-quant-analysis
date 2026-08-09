@@ -1,5 +1,5 @@
-param(
-    [string]$ProjectRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+﻿param(
+    [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
 Set-Location $ProjectRoot

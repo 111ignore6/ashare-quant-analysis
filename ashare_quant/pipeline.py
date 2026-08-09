@@ -56,9 +56,10 @@ def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
                       fetcher=None, universe_name: str = "csi300",
                       progress_every: int = 500, fallback_fetcher=None) -> dict:
     if fetcher is None:
-        from .fetchers import akshare_fetcher, baostock_fetcher
-        fetcher = akshare_fetcher.fetch_daily
-        fallback = baostock_fetcher.fetch_daily if fallback_fetcher is None else fallback_fetcher
+        from .fetchers import resolve_fetchers
+        fetcher, _, fallback = resolve_fetchers(cfg)
+        if fallback_fetcher is not None:
+            fallback = fallback_fetcher
     else:
         fallback = fallback_fetcher
     counts = {"ok": [], "failed": [], "skipped": [], "no_data": []}

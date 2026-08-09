@@ -1,5 +1,8 @@
 data/
 models/
+build/
+dist/
+*.spec
 .worktrees/
 dashboard_smoke.log
 __pycache__/
