@@ -7,10 +7,10 @@ import pandas as pd
 def compute_factors(close: pd.DataFrame, volume: pd.DataFrame,
                     n_short: int = 5, n_long: int = 20, n_vol: int = 20) -> dict[str, pd.DataFrame]:
     """每天对每只股票计算技术因子（未标准化）。"""
-    ret = close.pct_change()
+    ret = close.pct_change(fill_method=None)
     return {
-        "momentum": close.pct_change(n_long),
-        "reversal": -close.pct_change(n_short),
+        "momentum": close.pct_change(n_long, fill_method=None),
+        "reversal": -close.pct_change(n_short, fill_method=None),
         "volatility": ret.rolling(n_vol).std(),
         "ma_deviation": close / close.rolling(n_long).mean() - 1,
         "volume_ratio": volume.rolling(n_short).mean() / volume.rolling(n_long).mean(),

@@ -8,7 +8,7 @@ from statsmodels.stats.diagnostic import acorr_ljungbox, het_arch
 
 def distribution_stats(close: pd.DataFrame) -> dict:
     """全市场日收益的分布画像：每只股票算偏度/峰度，再取横截面中位数。"""
-    rets = close.pct_change().dropna(how="all")
+    rets = close.pct_change(fill_method=None).dropna(how="all")
     skews, kurts = [], []
     for col in rets.columns:
         s = rets[col].dropna()

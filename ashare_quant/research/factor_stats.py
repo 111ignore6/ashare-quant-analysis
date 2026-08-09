@@ -19,7 +19,7 @@ def cross_sectional_ic(factor_df: pd.DataFrame, target_df: pd.DataFrame,
         f = factor_df.loc[d].dropna()
         t = target_df.loc[d].dropna()
         common_cols = f.index.intersection(t.index)
-        if len(common_cols) < 10:
+        if len(common_cols) < 10 or f[common_cols].nunique() < 2 or t[common_cols].nunique() < 2:
             continue
         ic_values[d] = f[common_cols].corr(t[common_cols], method=method)
     return pd.Series(ic_values, dtype=float).sort_index()
