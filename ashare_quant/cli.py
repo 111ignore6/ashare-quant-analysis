@@ -196,6 +196,30 @@ def cmd_report(args) -> None:
     print(f"报告已生成: {args.out_dir}/report.html")
 
 
+def cmd_benchmark(args) -> None:
+    from .ml.benchmark import run_benchmark, write_report
+    from .pipeline import build_panels
+
+    cfg = Config.from_yaml(Path(args.config))
+    if args.data_root:
+        cfg.data_root = Path(args.data_root)
+    store = ParquetStore(cfg.data_root)
+    panels = build_panels(store)
+    close, volume = panels["close"], panels["volume"]
+    index_close = panels["index_close"]
+    if index_close.empty:
+        from .fetchers import akshare_fetcher
+        idx_df = akshare_fetcher.fetch_index_daily("sh000300")
+        store.save("sh000300", idx_df)
+        index_close = idx_df["close"]
+    table, series = run_benchmark(close, volume, index_close,
+                                  top_n=cfg.top_n, with_dl=args.with_dl)
+    out = Path(args.out)
+    write_report(table, out, out.with_suffix(".json"))
+    print(table.to_string(index=False))
+    print(f"算法对比报告已生成: {out}")
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="ashare_quant", description="A股量化研究·模拟分析（研究阶段）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -230,6 +254,12 @@ def main(argv=None) -> None:
     rep.add_argument("--data-root")
     rep.add_argument("--out-dir", default="docs/simulation")
     rep.set_defaults(func=cmd_report)
+    bm = sub.add_parser("benchmark", help="运行算法表现对比评测")
+    bm.add_argument("--config", default="config.yaml")
+    bm.add_argument("--data-root")
+    bm.add_argument("--out", default="docs/research/algorithm-benchmark.md")
+    bm.add_argument("--with-dl", action="store_true", help="包含 GRU 深度模型")
+    bm.set_defaults(func=cmd_benchmark)
     args = p.parse_args(argv)
     args.func(args)
 
