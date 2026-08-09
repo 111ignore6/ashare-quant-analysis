@@ -129,6 +129,7 @@ def cmd_simulate(args) -> None:
     store = ParquetStore(cfg.data_root)
     panels = build_panels(store)
     close, volume = panels["close"], panels["volume"]
+    index_close = panels["index_close"]
     open_ = panels["open"]
     models = {"momentum": MomentumModel(60), "reversal": ReversalModel(60),
               "lowvol": LowVolModel(60), "multifactor": MultiFactorModel(
@@ -142,7 +143,8 @@ def cmd_simulate(args) -> None:
         json.dumps({"summary": sim["summary"].to_dict(orient="records"),
                     "rotation_sharpe": float(metrics_from_returns(sim["rotation_returns"])["sharpe"])},
                    ensure_ascii=False, default=str), encoding="utf-8")
-    sim["model_returns"].to_csv(out_dir / "model_returns.csv", encoding="utf-8-sig")
+    _simulation_full_returns(close, index_close, sim).to_csv(
+        out_dir / "model_returns.csv", encoding="utf-8-sig")
     print(sim["summary"].to_string(index=False))
     print(f"模拟盘报告已生成: {out_dir}")
 
@@ -157,6 +159,7 @@ def _build_html_report(cfg, store, out_dir, panels=None) -> None:
     if panels is None:
         panels = build_panels(store)
     close, volume = panels["close"], panels["volume"]
+    index_close = panels["index_close"]
     open_ = panels["open"]
     models = {"momentum": MomentumModel(60), "reversal": ReversalModel(60),
               "lowvol": LowVolModel(60), "multifactor": MultiFactorModel(
@@ -165,12 +168,27 @@ def _build_html_report(cfg, store, out_dir, panels=None) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     sim = run_simulation(models, close, open_, volume, top_n=cfg.top_n,
                          log_path=out_dir / "adjustments.jsonl")
-    all_returns = sim["model_returns"].copy()
-    all_returns["rotation"] = sim["rotation_returns"]
+    all_returns = _simulation_full_returns(close, index_close, sim)
+    all_returns.to_csv(out_dir / "model_returns.csv", encoding="utf-8-sig")
     summary = factor_report(close, volume)["ic_summary"]
     build_html_report(equity_figure(all_returns), drawdown_figure(all_returns),
                       factor_heatmap(summary), sim["log"].read(),
                       data_through=str(close.index.max().date()), path=out_dir / "report.html")
+
+
+def _simulation_full_returns(close: pd.DataFrame, index_close: pd.Series,
+                             sim: dict) -> pd.DataFrame:
+    """模拟盘全收益表：4 个手工模型 + 轮动 + 两条真实基准（等权全市场、沪深300）。"""
+    from .backtest.simple import monthly_rebalance_dates
+
+    out = sim["model_returns"].copy()
+    out["rotation"] = sim["rotation_returns"]
+    rdates = monthly_rebalance_dates(close.index)
+    bench_eq = close.loc[rdates].pct_change(fill_method=None).mean(axis=1).dropna()
+    bench_idx = index_close.reindex(rdates).pct_change(fill_method=None).dropna()
+    out["基准·等权全市场"] = bench_eq.reindex(out.index)
+    out["基准·沪深300"] = bench_idx.reindex(out.index)
+    return out
 
 
 def cmd_daily(args) -> None:
@@ -233,6 +251,9 @@ def cmd_benchmark(args) -> None:
                                   top_n=cfg.top_n, with_dl=args.with_dl)
     out = Path(args.out)
     write_report(table, out, out.with_suffix(".json"))
+    returns_path = out.with_name(out.stem + ".returns.csv")
+    pd.DataFrame(series).to_csv(returns_path, encoding="utf-8-sig")
+    print(f"算法收益序列已保存: {returns_path}")
     print(table.to_string(index=False))
     print(f"算法对比报告已生成: {out}")
 

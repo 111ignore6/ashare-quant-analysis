@@ -177,6 +177,15 @@ def run_benchmark(close: pd.DataFrame, volume: pd.DataFrame, index_close: pd.Ser
     rows = []
     series: dict[str, pd.Series] = {}
 
+    # 真实基准：等权全市场与沪深300 指数（月度，与策略同口径）
+    rdates_all = monthly_rebalance_dates(close.index)
+    bench_eq = close.loc[rdates_all].pct_change(fill_method=None).mean(axis=1).dropna()
+    bench_idx = index_close.reindex(rdates_all).pct_change(fill_method=None).dropna()
+    series["benchmark_等权全市场"] = bench_eq
+    series["benchmark_沪深300"] = bench_idx
+    rows.append(_metrics_row("基准·等权全市场", bench_eq))
+    rows.append(_metrics_row("基准·沪深300", bench_idx))
+
     for name, returns in baseline_returns(close, volume, folds, top_n).items():
         rows.append(_metrics_row(name, returns))
         series[name] = returns
