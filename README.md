@@ -25,3 +25,10 @@ python -m ashare_quant.cli research                            # 生成研究报
 python -m ashare_quant.cli daily          # 增量更新数据并生成当日 HTML 报告
 .\scripts\schedule_daily.ps1              # 注册 Windows 计划任务（周一至五 16:05 自动运行）
 ```
+
+## 全市场模式
+
+```bash
+python -m ashare_quant.cli fetch --universe all --data-root data/all --years 3
+python -m ashare_quant.cli daily --data-root data/all
+```

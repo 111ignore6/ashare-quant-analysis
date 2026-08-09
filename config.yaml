@@ -1,5 +1,5 @@
-data_root: data
-universe_mode: csi300   # csi300 | all
+data_root: data/all
+universe_mode: all      # csi300 | all
 years: 3
 adjust: qfq
 max_workers: 8
