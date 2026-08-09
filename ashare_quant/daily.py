@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 
 from .cache import ParquetStore
@@ -33,8 +35,8 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
     if prev_index_end and str(last.date()) == prev_index_end:
         return {"new_index_date": str(last.date()), "updated": [], "up_to_date": "all",
                 "failed": [], "new_data": False}
-    updated, up_to_date, failed = [], [], []
-    for code in codes:
+
+    def _update_one(code: str) -> tuple[str, str]:
         try:
             entry = manifest.get(code, {})
             end_ts = pd.Timestamp(entry["end"]) if entry.get("end") else None
@@ -45,16 +47,19 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 start = (pd.Timestamp.today().normalize() - pd.DateOffset(years=cfg.years)).strftime("%Y%m%d")
             else:
                 if end_ts >= last:
-                    up_to_date.append(code)
-                    continue
+                    return "up_to_date", code
                 start = (end_ts + pd.Timedelta(days=1)).strftime("%Y%m%d")
             df = fetcher(code, start, str(last).replace("-", ""), cfg.adjust)
             if not df.empty:
                 store.append(code, df)
-                updated.append(code)
-            else:
-                up_to_date.append(code)
+                return "updated", code
+            return "up_to_date", code
         except Exception:
-            failed.append(code)
+            return "failed", code
+
+    updated, up_to_date, failed = [], [], []
+    with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:
+        for status, code in ex.map(_update_one, codes):
+            {"updated": updated, "up_to_date": up_to_date, "failed": failed}[status].append(code)
     return {"new_index_date": str(last.date()), "updated": sorted(updated),
             "up_to_date": sorted(up_to_date), "failed": sorted(failed), "new_data": True}

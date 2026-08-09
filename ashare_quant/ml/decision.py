@@ -15,7 +15,8 @@ from .models import MODELS
 def train_and_save(X: pd.DataFrame, y: pd.Series, out_dir: Path,
                    model_names=("lgbm", "histgb", "svm"),
                    sample_size: int = 60000, calib_months: int = 3,
-                   alpha: float = 0.5) -> dict:
+                   alpha: float = 0.5, svm_sample_cap: int = 20000,
+                   calib_sample_cap: int = 30000, as_of=None) -> dict:
     """在全部历史上训练若干模型；最后 calib_months 作为校准期计算残差阈值。"""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -30,16 +31,24 @@ def train_and_save(X: pd.DataFrame, y: pd.Series, out_dir: Path,
     thresholds: dict[str, float] = {}
     for name in model_names:
         model = MODELS[name]()
-        model.fit(Xtr, ytr)
+        if name == "svm" and len(idx) > svm_sample_cap:
+            svm_idx = np.random.default_rng(0).choice(idx, svm_sample_cap, replace=False)
+            model.fit(X.iloc[svm_idx], y.iloc[svm_idx])
+        else:
+            model.fit(Xtr, ytr)
         joblib.dump(model, out_dir / f"{name}.joblib")
-        calib_rows = X[calib_mask]
-        if len(calib_rows):
-            resid = np.abs(model.predict(calib_rows) - y.loc[calib_rows.index].values)
+        calib_idx = np.flatnonzero(calib_mask)
+        if len(calib_idx) > calib_sample_cap:
+            calib_idx = np.random.default_rng(1).choice(
+                calib_idx, calib_sample_cap, replace=False)
+        if len(calib_idx):
+            resid = np.abs(model.predict(X.iloc[calib_idx]) - y.iloc[calib_idx].values)
             thresholds[name] = float(np.quantile(resid, 1 - alpha))
     meta = {
         "models": list(model_names),
         "thresholds": thresholds,
-        "trained_on": str(dates.max().date()),
+        "trained_on": (str(pd.Timestamp(as_of).date())
+                       if as_of is not None else str(dates.max().date())),
         "alpha": alpha,
     }
     (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2),

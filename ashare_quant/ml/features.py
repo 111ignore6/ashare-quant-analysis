@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -27,10 +28,16 @@ def build_dataset(close: pd.DataFrame, volume: pd.DataFrame,
         "ma_dev_60": close / close.rolling(60).mean() - 1,
         "vol_ratio": volume.rolling(5).mean() / volume.rolling(20).mean(),
     }
-    frames = [f.stack(future_stack=True).rename(name) for name, f in feats.items()]
-    X = pd.concat(frames, axis=1)
-    X.index.names = ["date", "symbol"]
-    X["cs_rank_ret20"] = close.pct_change(20, fill_method=None).rank(axis=1, pct=True).stack(future_stack=True)
+    names = list(feats)
+    wide = np.stack([feats[name].to_numpy() for name in names], axis=2)
+    n_dates, n_symbols, n_feats = wide.shape
+    idx = pd.MultiIndex.from_product(
+        [close.index, close.columns], names=["date", "symbol"])
+    X = pd.DataFrame(wide.reshape(n_dates * n_symbols, n_feats),
+                     index=idx, columns=names)
+    X["cs_rank_ret20"] = (
+        close.pct_change(20, fill_method=None).rank(axis=1, pct=True)
+        .to_numpy().reshape(-1))
 
     idx_ret20 = index_close.pct_change(20, fill_method=None)
     idx_vol20 = index_close.pct_change(fill_method=None).rolling(20).std()
@@ -42,7 +49,9 @@ def build_dataset(close: pd.DataFrame, volume: pd.DataFrame,
     })
     X = X.join(idx_feats, on="date")
 
-    target = (close.shift(-horizon) / close - 1).stack(future_stack=True).rename("target")
+    target = pd.Series(
+        (close.shift(-horizon) / close - 1).to_numpy().reshape(-1),
+        index=idx, name="target")
     mask = X.notna().all(axis=1) & target.notna()
     if not require_target:
         mask = X.notna().all(axis=1)

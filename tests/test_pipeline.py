@@ -43,6 +43,23 @@ def test_build_panels(tmp_path):
     panels = build_panels(store)
     assert panels["close"].shape == (2, 2)
     assert panels["close"].columns.tolist() == ["000001", "000002"]
+    assert "open" in panels and panels["open"].shape == (2, 2)
+
+
+def test_build_panels_cache_hit_and_invalidate(tmp_path):
+    store = ParquetStore(tmp_path)
+    for i in range(10):
+        code = f"{i:06d}"
+        store.save(code, _df(["2024-01-02", "2024-01-03"], [10 + i, 10.5 + i]))
+    p1 = build_panels(store, use_cache=True)
+    assert (tmp_path / "panels" / "meta.json").exists()
+    p2 = build_panels(store, use_cache=True)
+    assert p1["close"].equals(p2["close"])
+    # 数据更新（新增交易日）后缓存应失效并重建
+    store.append("000000", _df(["2024-01-04"], [11]))
+    p3 = build_panels(store, use_cache=True)
+    assert p3["close"].shape == (3, 10)
+    assert p3["close"].loc["2024-01-04", "000000"] == 11.0
 
 
 def test_download_universe_progress(capsys, tmp_path):

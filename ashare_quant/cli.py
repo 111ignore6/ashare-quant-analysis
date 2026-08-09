@@ -126,7 +126,7 @@ def cmd_simulate(args) -> None:
     store = ParquetStore(cfg.data_root)
     panels = build_panels(store)
     close, volume = panels["close"], panels["volume"]
-    open_ = pd.DataFrame({s: store.load(s)["open"] for s in close.columns}).sort_index()
+    open_ = panels["open"]
     models = {"momentum": MomentumModel(60), "reversal": ReversalModel(60),
               "lowvol": LowVolModel(60), "multifactor": MultiFactorModel(
                   {"volume_ratio": 0.4, "ma_deviation": 0.2, "reversal60": 0.2, "lowvol": 0.2})}
@@ -144,16 +144,17 @@ def cmd_simulate(args) -> None:
     print(f"模拟盘报告已生成: {out_dir}")
 
 
-def _build_html_report(cfg, store, out_dir) -> None:
+def _build_html_report(cfg, store, out_dir, panels=None) -> None:
     from .models.candidates import LowVolModel, MomentumModel, MultiFactorModel, ReversalModel
     from .pipeline import build_panels
     from .research.factor_stats import factor_report
     from .report.html_report import build_html_report, drawdown_figure, equity_figure, factor_heatmap
     from .simulation import run_simulation
 
-    panels = build_panels(store)
+    if panels is None:
+        panels = build_panels(store)
     close, volume = panels["close"], panels["volume"]
-    open_ = pd.DataFrame({s: store.load(s)["open"] for s in close.columns}).sort_index()
+    open_ = panels["open"]
     models = {"momentum": MomentumModel(60), "reversal": ReversalModel(60),
               "lowvol": LowVolModel(60), "multifactor": MultiFactorModel(
                   {"volume_ratio": 0.4, "ma_deviation": 0.2, "reversal60": 0.2, "lowvol": 0.2})}
@@ -171,25 +172,31 @@ def _build_html_report(cfg, store, out_dir) -> None:
 
 def cmd_daily(args) -> None:
     from .daily import update_daily
-    from .universe import load_universe
+    from .pipeline import build_panels
+    from .universe import load_universe_cached
 
     cfg = Config.from_yaml(Path(args.config))
     if args.data_root:
         cfg.data_root = Path(args.data_root)
     store = ParquetStore(cfg.data_root)
-    codes = load_universe(cfg.universe_mode)
+    local_symbols = [s for s in store.symbols() if s != "sh000300"]
+    codes = load_universe_cached(
+        cfg.universe_mode, cache_path=cfg.data_root / "universe.json",
+        extra=local_symbols)
     out = update_daily(codes, store, cfg)
+    n_up = len(out["up_to_date"]) if isinstance(out["up_to_date"], list) else "all"
     print(f"指数截止={out['new_index_date']} 更新={len(out['updated'])} "
-          f"已最新={len(out['up_to_date'])} 失败={len(out['failed'])}")
+          f"已最新={n_up} 失败={len(out['failed'])}")
     if out["failed"]:
         print("failed:", ",".join(out["failed"][:20]))
     if not out.get("new_data", True) and not args.force:
         print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）")
         return
-    _build_html_report(cfg, store, args.out_dir)
+    panels = build_panels(store)
+    _build_html_report(cfg, store, args.out_dir, panels=panels)
     if not args.no_decision:
         _save_decision(cfg, store, args.model_dir, args.sample_size,
-                       args.retrain, args.out_dir)
+                       args.retrain, args.out_dir, panels=panels)
     print(f"当日报告已生成: {args.out_dir}/report.html")
 
 
@@ -227,14 +234,15 @@ def cmd_benchmark(args) -> None:
 
 
 def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
-                   out_dir) -> None:
+                   out_dir, panels=None) -> None:
     import json
 
     from .ml.decision import decide, load_models, train_and_save
     from .ml.features import build_dataset, load_feature_cache, save_feature_cache
     from .pipeline import build_panels
 
-    panels = build_panels(store)
+    if panels is None:
+        panels = build_panels(store)
     close, volume = panels["close"], panels["volume"]
     index_close = panels["index_close"]
     if index_close.empty:
@@ -252,6 +260,10 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
     ok = y_all.notna()
     X, y = X_all[ok], y_all[ok]
     model_dir = Path(model_dir)
+    if not (model_dir / "meta.json").exists():
+        nested = model_dir / cfg.universe_mode
+        if (nested / "meta.json").exists():
+            model_dir = nested
     meta_path = model_dir / "meta.json"
     need_retrain = retrain or not meta_path.exists()
     if not need_retrain:
@@ -260,7 +272,8 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
         if (pd.Timestamp.today().normalize() - trained).days > 30:
             need_retrain = True
     if need_retrain:
-        train_and_save(X, y, model_dir, sample_size=sample_size)
+        train_and_save(X, y, model_dir, sample_size=sample_size,
+                       as_of=close.index.max())
     loaded = load_models(model_dir)
     last_date = X_all.index.get_level_values("date").max()
     picks = decide(loaded, X_all, close, last_date, top_n=cfg.top_n)

@@ -53,3 +53,28 @@ python -m streamlit run dashboard.py
 .\scripts\start_dashboard.ps1    # 只启动仪表盘
 python -m ashare_quant.cli daily --data-root data/all   # 每日：增量更新 + 报告 + 自动决策
 ```
+
+## 性能优化（2026-08 重构）
+
+全市场（5332 只 × 3 年日线，约 90MB 原始数据）此前全流程耗时约 3 分钟，经剖析确认
+**瓶颈是代码开销而非硬件性能**（数据量很小，CPU/内存充足），已逐项向量化：
+
+| 环节 | 优化前 | 优化后 | 手段 |
+|---|---|---|---|
+| 面板加载 build_panels | ~58s | ~10s（缓存命中 ~1.5s） | 每只股票只读一次 + 并行 IO + 数据未变时读合并缓存 |
+| 横截面 IC（5 因子） | ~22s | ~5s | 逐日循环 → 一次排序同时产出 average/first 秩（自研 numpy 算子） |
+| 分层收益（5 因子） | ~17s | ~5s | 逐日 qcut → 向量化分位边界公式 |
+| 去极值 z-score（5 因子） | ~7s | ~3s | 逐行 apply → numpy nanquantile/nanmean/nanstd |
+| 特征长表 build_dataset | ~25s | ~5.5s | 12 次 stack+concat → 一次 numpy reshape |
+| daily 无新数据 | ~51s（含联网拉全市场列表） | ~2s | universe 本地缓存 + 指数日期相等时秒回 |
+| daily --force 报告+决策 | ~180s | ~28s（含每月一次的重训） | 上述全部 + SVR 采样封顶/校准集抽样 |
+
+数值一致性：向量化后的 IC/分层与旧逐日实现逐值对比，差异在机器精度
+（~1e-16），研究报告结果完全可复现。测试套件 70 项全绿。
+
+### 说明
+
+- 决策模型每月重训一次（LGBM/HistGB 6 万样本，SVR 封顶 2 万样本、校准集抽样 3 万），
+  单次重训约 25s；SVR 全量 6 万样本训练需 ~3 分钟，故按模型差异化采样；
+- benchmark 全量算法对比（7 个 ML 模型 × 4 折 walk-forward）因含逐折 SVR/MLP 训练，
+  属于算法本身的计算成本，约 5-8 分钟，与日常数据流水线无关。

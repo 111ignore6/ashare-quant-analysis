@@ -5,6 +5,7 @@ import pandas as pd
 
 from ..backtest.metrics import metrics_from_returns
 from ..backtest.simple import monthly_rebalance_dates, simple_topn_returns
+from ..research.factor_stats import cross_sectional_ic
 from ..screening import walk_forward_folds
 
 
@@ -15,10 +16,10 @@ def predict_scores(model, X: pd.DataFrame, dates) -> pd.DataFrame:
 
 
 def _rank_ic(preds: pd.Series, y: pd.Series) -> pd.Series:
-    df = pd.DataFrame({"pred": preds.values, "actual": y.values}, index=preds.index)
-    df.index.names = ["date", "symbol"]
-    return df.groupby(level="date").apply(
-        lambda g: g["pred"].corr(g["actual"], method="spearman"))
+    """预测分与真实收益的逐日 Spearman IC（向量化，等价于逐日 corr）。"""
+    pred_w = preds.unstack("symbol")
+    actual_w = y[preds.index].unstack("symbol")
+    return cross_sectional_ic(pred_w, actual_w, min_n=2)
 
 
 def walk_forward_ml_evaluate(name: str, make_model, X: pd.DataFrame, y: pd.Series,
