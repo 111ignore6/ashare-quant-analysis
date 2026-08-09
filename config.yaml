@@ -1,0 +1,9 @@
+data_root: data
+universe_mode: csi300   # csi300 | all
+years: 3
+adjust: qfq
+max_workers: 8
+retry: 3
+rate_limit_per_second: 2
+top_n: 50
+rebalance: M
