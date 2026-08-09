@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 from ashare_quant.models.candidates import MomentumModel, ReversalModel
-from ashare_quant.screening import evaluate, grid_search, run_screening, split_dates
+from ashare_quant.screening import (evaluate, grid_search, run_screening, split_dates,
+                                    walk_forward_evaluate, walk_forward_folds)
 
 
 def _panel():
@@ -20,6 +21,19 @@ def test_split_dates():
     tr, va = split_dates(close.index, train_frac=0.6)
     assert len(tr) > len(va)
     assert tr[-1] < va[0]
+
+
+def test_walk_forward_folds_and_evaluate():
+    close, volume = _panel()
+    folds = walk_forward_folds(close.index, train_months=6, valid_months=3, step_months=3)
+    assert len(folds) >= 2
+    for tr, va in folds:
+        assert tr[-1] < va[0]
+    series, m, params = walk_forward_evaluate(ReversalModel, {"horizon": [20, 60]},
+                                              close, volume, folds, top_n=10)
+    assert len(series) >= 3
+    assert "sharpe" in m
+    assert "horizon" in params
 
 
 def test_grid_search_picks_best_train_sharpe():
