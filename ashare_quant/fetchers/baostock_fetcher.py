@@ -24,6 +24,10 @@ def rows_to_frame(fields: list[str], rows: list[list]) -> pd.DataFrame:
     return df.set_index("date")[_COLS].sort_index()
 
 
+def _fmt_date(d) -> str:
+    return pd.Timestamp(d).strftime("%Y-%m-%d")
+
+
 def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
     import baostock as bs
 
@@ -34,8 +38,8 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
         rs = bs.query_history_k_data_plus(
             to_baostock_code(symbol),
             "date,open,high,low,close,volume,amount",
-            start_date=str(start),
-            end_date=str(end),
+            start_date=_fmt_date(start),
+            end_date=_fmt_date(end),
             frequency="d",
             adjustflag="2" if adjust == "qfq" else "3",
         )
