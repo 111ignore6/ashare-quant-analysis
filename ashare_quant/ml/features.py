@@ -4,7 +4,8 @@ import pandas as pd
 
 
 def build_dataset(close: pd.DataFrame, volume: pd.DataFrame,
-                  index_close: pd.Series, horizon: int = 20):
+                  index_close: pd.Series, horizon: int = 20,
+                  require_target: bool = True):
     """把面板拼成 长表特征集 (date, symbol)，target = 未来 horizon 日收益。
 
     所有特征只用当日及之前的数据（滚动窗口），横截面排名特征只用当日横截面。
@@ -40,4 +41,6 @@ def build_dataset(close: pd.DataFrame, volume: pd.DataFrame,
 
     target = (close.shift(-horizon) / close - 1).stack(future_stack=True).rename("target")
     mask = X.notna().all(axis=1) & target.notna()
+    if not require_target:
+        mask = X.notna().all(axis=1)
     return X[mask], target[mask]

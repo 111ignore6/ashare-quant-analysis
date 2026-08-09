@@ -239,13 +239,15 @@ def cmd_decision(args) -> None:
         idx_df = akshare_fetcher.fetch_index_daily("sh000300")
         store.save("sh000300", idx_df)
         index_close = idx_df["close"]
-    X, y = build_dataset(close, volume, index_close, horizon=20)
+    X_all, y_all = build_dataset(close, volume, index_close, horizon=20, require_target=False)
+    ok = y_all.notna()
+    X, y = X_all[ok], y_all[ok]
     model_dir = Path(args.model_dir)
     if args.retrain or not (model_dir / "meta.json").exists():
         train_and_save(X, y, model_dir, sample_size=args.sample_size)
     loaded = load_models(model_dir)
-    last_date = X.index.get_level_values("date").max()
-    picks = decide(loaded, X, close, last_date, top_n=cfg.top_n)
+    last_date = X_all.index.get_level_values("date").max()
+    picks = decide(loaded, X_all, close, last_date, top_n=cfg.top_n)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {
