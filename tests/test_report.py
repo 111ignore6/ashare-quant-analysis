@@ -10,6 +10,7 @@ def _results():
         "factor_summary": pd.DataFrame({"icir": [0.5, 0.2]}, index=["momentum", "volume_ratio"]),
         "pca": {"first_ratio": 0.7, "n_components_80": 2},
         "regimes": pd.DataFrame({"state": [1, 2, 3], "mean_fwd": [0.01, 0.02, -0.03]}),
+        "data_through": "2026-08-07",
     }
 
 
@@ -23,4 +24,4 @@ def test_build_report_writes_file(tmp_path):
     out = tmp_path / "research.md"
     build_report(_results(), out)
     text = out.read_text(encoding="utf-8")
-    assert "R1" in text and "不构成投资建议" in text
+    assert "R1" in text and "不构成投资建议" in text and "2026-08-07" in text

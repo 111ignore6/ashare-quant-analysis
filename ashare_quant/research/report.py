@@ -25,7 +25,7 @@ def conclusions(results: dict) -> list[str]:
     fac = results.get("factor_summary")
     if fac is not None and not fac.empty:
         strong = fac[fac["icir"].abs() > 0.3].index.tolist()
-        conc.append(f"R4 稳定有效因子：{strong if strong else '暂无明显有效因子（|ICIR|>0.3）'}")
+        conc.append(f"R4 稳定有效因子：{'、'.join(strong) if strong else '暂无明显有效因子（|ICIR|>0.3）'}")
 
     pca = results.get("pca", {})
     r1 = pca.get("first_ratio", 0.0)
@@ -43,6 +43,7 @@ def build_report(results: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# A股历史数据研究报告（研究阶段）", "",
              "> 模拟研究，仅用于数据分析与学习，不构成投资建议。", "",
+             f"> 数据截止日期：{results.get('data_through', '未知')}", "",
              "## 研究结论", ""]
     lines += [f"- {c}" for c in conclusions(results)]
     lines += ["", "## 明细数据", "", "```json", results.get("raw_json", "见同目录 results.json"), "```"]

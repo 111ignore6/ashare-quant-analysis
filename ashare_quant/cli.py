@@ -69,12 +69,13 @@ def cmd_research(args) -> None:
         "factor_report": factor_report(close, volume),
         "pca": redundancy.pca_redundancy(z_factors),
         "regimes": regimes.state_forward_returns(index_close),
+        "data_through": str(close.index.max().date()),
     }
     results["factor_summary"] = results["factor_report"]["ic_summary"]
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     serializable = {k: v for k, v in results.items() if k in (
-        "distribution", "volatility", "momentum", "factor_summary", "pca", "regimes")}
+        "distribution", "volatility", "momentum", "factor_summary", "pca", "regimes", "data_through")}
     results["raw_json"] = json.dumps(
         {k: (v.to_dict() if hasattr(v, "to_dict") else v) for k, v in serializable.items()},
         ensure_ascii=False, default=str)
