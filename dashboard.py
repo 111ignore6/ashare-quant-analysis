@@ -142,11 +142,13 @@ def equity_figure(returns: pd.DataFrame) -> go.Figure:
 
 # ---------- 后台任务管理：在页面内直接跑数据下载/更新，实时回显输出 ----------
 
-_TASK_QUEUES: dict[str, queue.Queue] = {}
+def _task_queue(key: str) -> queue.Queue:
+    """任务队列存 session_state（跨页面刷新持久，后台线程与渲染共享）。"""
+    st.session_state.setdefault("task_queues", {})
+    return st.session_state["task_queues"].setdefault(key, queue.Queue())
 
 
-def _task_worker(key: str, cmd: list[str], cwd: Path) -> None:
-    q = _TASK_QUEUES[key]
+def _task_worker(key: str, cmd: list[str], cwd: Path, q: queue.Queue) -> None:
     log_dir = cwd / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_f = open(log_dir / f"{key}.log", "a", encoding="utf-8")
@@ -173,16 +175,21 @@ def launch_task(key: str, cmd: list[str], cwd: Path) -> None:
         key, {"lines": [], "running": False, "code": None})
     if state["running"]:
         return
-    _TASK_QUEUES[key] = queue.Queue()
+    q = _task_queue(key)
+    while not q.empty():  # 清空上次遗留
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            break
     state.update({"lines": [], "running": True, "code": None})
-    threading.Thread(target=_task_worker, args=(key, cmd, cwd), daemon=True).start()
+    threading.Thread(target=_task_worker, args=(key, cmd, cwd, q), daemon=True).start()
 
 
 def render_task(key: str, title: str) -> bool:
     """渲染任务进度；返回是否仍在运行。"""
     state = st.session_state.setdefault("task_state", {}).setdefault(
         key, {"lines": [], "running": False, "code": None})
-    q = _TASK_QUEUES.get(key)
+    q = st.session_state.get("task_queues", {}).get(key)
     if q is not None:
         while True:
             try:

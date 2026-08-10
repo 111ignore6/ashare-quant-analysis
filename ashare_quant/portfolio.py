@@ -135,11 +135,12 @@ def update_portfolio(close: pd.DataFrame, cfg, portfolio_dir: Path,
     equity = ((1 + returns.fillna(0)).cumprod() * float(cfg.initial_capital))
     equity.to_csv(portfolio_dir / EQUITY_FILENAME, encoding="utf-8-sig")
     metrics = metrics_from_returns(returns, periods_per_year=252)
+    live_decisions = len([e for e in history if e.get("mode") == "live"])
     summary = {
         "initial_capital": float(cfg.initial_capital),
         "total_asset": float(equity.iloc[-1]) if len(equity) else float(cfg.initial_capital),
         "total_return": float(equity.iloc[-1] / cfg.initial_capital - 1) if len(equity) else 0.0,
-        "decisions": len(history),
+        "decisions": live_decisions or len(history),
         "backfilled": added,
         "as_of": str(close.index.max().date()),
         **{k: float(v) for k, v in metrics.items()},
