@@ -13,7 +13,7 @@ from .models import MODELS
 
 
 def train_and_save(X: pd.DataFrame, y: pd.Series, out_dir: Path,
-                   model_names=("lgbm", "histgb", "svm"),
+                   model_names=("lgbm", "histgb", "rf", "svm", "knn", "linear"),
                    sample_size: int = 60000, calib_months: int = 3,
                    alpha: float = 0.5, svm_sample_cap: int = 20000,
                    calib_sample_cap: int = 30000, as_of=None) -> dict:

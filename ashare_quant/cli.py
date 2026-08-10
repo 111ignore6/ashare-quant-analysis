@@ -236,8 +236,13 @@ def cmd_daily(args) -> None:
     _build_html_report(cfg, store, args.out_dir, panels=panels)
     if not args.no_decision:
         print("阶段 3/3：训练/加载模型并生成今日决策…", flush=True)
-        _save_decision(cfg, store, args.model_dir, args.sample_size,
-                       args.retrain, args.out_dir, panels=panels)
+        payload, account = _save_decision(cfg, store, args.model_dir, args.sample_size,
+                                          args.retrain, args.out_dir, panels=panels)
+        from .report.daily_report import build_daily_report
+        report_path = build_daily_report(
+            cfg, out, payload, account, store.read_manifest(),
+            Path(args.out_dir) / "daily_report.md")
+        print(f"每日决策日报已生成: {report_path}", flush=True)
     print(f"当日报告已生成: {args.out_dir}/report.html")
 
 
@@ -306,10 +311,10 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
     ok = y_all.notna()
     X, y = X_all[ok], y_all[ok]
     model_dir = Path(model_dir)
-    if not (model_dir / "meta.json").exists():
-        nested = model_dir / cfg.universe_mode
-        if (nested / "meta.json").exists():
-            model_dir = nested
+    nested = model_dir / cfg.universe_mode
+    if (nested / "meta.json").exists():
+        # universe 专属目录优先（避免与旧根目录模型混淆）
+        model_dir = nested
     meta_path = model_dir / "meta.json"
     need_retrain = retrain or not meta_path.exists()
     if not need_retrain:
@@ -346,6 +351,7 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
     print(f"决策日期: {last_date.date()}  持仓 {len(picks)} 只")
     print(picks.head(20).to_string(index=False))
     print(f"决策已保存: {out_dir}/decision.json")
+    return payload, summary
 
 
 def cmd_decision(args) -> None:

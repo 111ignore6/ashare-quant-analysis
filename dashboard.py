@@ -482,7 +482,13 @@ with tab_data:
         st.write(f"股票/指数缓存文件数：{len(parquet)}")
         st.write(f"数据清单（manifest）条目数：{len(manifest2) if manifest2 else 0}")
         if manifest2:
-            st.write(f"覆盖股票数：{len({k for k in manifest2 if k != 'sh000300'})}")
+            stocks2 = {k: v for k, v in manifest2.items() if k != "sh000300"}
+            idx_end2 = manifest2.get("sh000300", {}).get("end")
+            stale2 = [k for k, v in stocks2.items()
+                      if v.get("end") and idx_end2 and v["end"] < idx_end2]
+            st.write(f"覆盖股票数：{len(stocks2)}")
+            st.write(f"数据完整率：{(len(stocks2) - len(stale2)) / len(stocks2):.2%}"
+                     f"（与指数同步 {len(stocks2) - len(stale2)}/{len(stocks2)}）")
             ends = {}
             for k, v in manifest2.items():
                 if k == "sh000300":
