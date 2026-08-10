@@ -35,7 +35,8 @@ def end_date_for(cfg: Config) -> str:
     return pd.Timestamp.today().normalize().strftime("%Y%m%d")
 
 
-def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher, fallback=None) -> str:
+def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher, fallback=None,
+               update_manifest: bool = True) -> str:
     if store.exists(code):
         return "skipped"
     for attempt in range(max(1, cfg.retry)):
@@ -43,7 +44,7 @@ def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher, fallback=No
             df = _fetch_with_fallback(code, cfg, fetcher, fallback)
             if df.empty:
                 return "no_data"
-            store.append(code, df)
+            store.append(code, df, update_manifest=update_manifest)
             return "ok"
         except Exception:
             if attempt == max(1, cfg.retry) - 1:
@@ -65,13 +66,15 @@ def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
     counts = {"ok": [], "failed": [], "skipped": [], "no_data": []}
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:
-        futures = {ex.submit(_fetch_one, c, cfg, store, fetcher, fallback): c for c in codes}
+        futures = {ex.submit(_fetch_one, c, cfg, store, fetcher, fallback,
+                             False): c for c in codes}
         for fut in as_completed(futures):
             done += 1
             if done % progress_every == 0:
                 print(f"progress {done}/{len(codes)}", flush=True)
             status = fut.result()
             counts.setdefault(status, []).append(futures[fut])
+    store.rebuild_manifest()
     result = {"universe": universe_name, **counts}
     for key in ("ok", "failed", "skipped", "no_data"):
         result[key] = sorted(result[key])

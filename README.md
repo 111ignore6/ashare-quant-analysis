@@ -70,7 +70,12 @@ python -m streamlit run dashboard.py
 ```
 
 - **总览**：状态卡片（股票数/数据截止/落后数/持仓）、一键操作（每日更新/强制重算/下载数据，后台运行实时输出）、今日持仓前 10；
+- **实时行情**：决策持仓的准实时快照（秒级延迟，腾讯/新浪源，自动刷新可选），
+  并跟踪自决策日以来的涨跌；
 - **模拟盘 / 今日决策 / 算法对比 / 调整日志 / 数据状态**：净值曲线（含沪深300 与等权全市场真实基准）、预期收益、样本外夏普与算法净值、权重调整日志、数据清单与失败清单。
+
+> 实时行情为免费快照级（延迟数秒），非交易所级 tick；供盘中观察与持仓跟踪，
+> 不改变月度调仓的决策逻辑。
 
 ## 扩展机制（便于后续开发维护）
 
@@ -82,7 +87,9 @@ python -m streamlit run dashboard.py
   签名 `(close, volume, **params)`，`compute_factors` 自动收集；
 - **数据源**：`ashare_quant/fetchers/registry.py` 用 `register_source("name", module)`
   注册，`config.yaml` 里 `data_source` / `fallback_source` 切换主备源
-  （默认 `tencent`：直连腾讯行情，实测并发 12 约 22 只/秒，是新浪源的 4 倍以上）。
+  （默认 `tencent`：直连腾讯行情，实测并发 12 约 22 只/秒，是新浪源的 4 倍以上；
+  更新时主源失败自动切备源）。实时行情用 [easyquotation](https://github.com/shidenggui/easyquotation)
+  （5.3k★）腾讯/新浪快照。
 
 内置状态：模型 7 个（linear/rf/lgbm/histgb/svm/knn/mlp）、因子 5 个
 （momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 3 个

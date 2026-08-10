@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dashboard = ["streamlit>=1.30"]
+dashboard = ["streamlit>=1.30", "streamlit-autorefresh>=1.0", "easyquotation>=0.7"]
 dl = ["torch>=2.0"]
 dev = ["pytest>=8.0", "pyinstaller>=6.6", "ruff>=0.4"]
 

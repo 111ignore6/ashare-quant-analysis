@@ -53,12 +53,13 @@ def _save_failed_cache(store: ParquetStore, failed: dict) -> None:
 
 def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                  index_fetcher=None, fetcher=None, index_symbol: str = "sh000300") -> dict:
+    fallback_fetcher = None
     if index_fetcher is None:
         from .fetchers import resolve_fetchers
-        _, index_fetcher, _ = resolve_fetchers(cfg)
+        _, index_fetcher, fallback_fetcher = resolve_fetchers(cfg)
     if fetcher is None:
         from .fetchers import resolve_fetchers
-        fetcher, _, _ = resolve_fetchers(cfg)
+        fetcher, _, fallback_fetcher = resolve_fetchers(cfg)
     manifest = store.read_manifest()
     prev_index_end = manifest.get(index_symbol, {}).get("end")
     idx_start = (pd.Timestamp(prev_index_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d") \
@@ -98,7 +99,7 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 "failed": [], "new_data": False, "stale": len(stale)}
 
     def _update_one(code: str) -> tuple[str, str]:
-        def _fetch_attempt() -> str:
+        def _fetch_attempt(f) -> str:
             end_ts = _symbol_end(manifest, store, code)
             if end_ts is None:
                 start = (pd.Timestamp.today().normalize() - pd.DateOffset(years=cfg.years)).strftime("%Y%m%d")
@@ -106,19 +107,21 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 if end_ts >= last:
                     return "up_to_date"
                 start = (end_ts + pd.Timedelta(days=1)).strftime("%Y%m%d")
-            df = fetcher(code, start, str(last).replace("-", ""), cfg.adjust)
+            df = f(code, start, str(last).replace("-", ""), cfg.adjust)
             if not df.empty:
                 store.append(code, df)
                 return "updated"
             return "no_data"
 
-        for attempt in range(max(1, cfg.retry)):
-            try:
-                return _fetch_attempt(), code
-            except Exception:
-                if attempt == max(1, cfg.retry) - 1:
-                    return "failed", code
-                time.sleep(0.5)
+        sources = [fetcher] + ([fallback_fetcher] if fallback_fetcher else [])
+        for f in sources:
+            for attempt in range(max(1, cfg.retry)):
+                try:
+                    return _fetch_attempt(f), code
+                except Exception:
+                    if attempt == max(1, cfg.retry) - 1:
+                        break
+                    time.sleep(0.5)
         return "failed", code
 
     updated, up_to_date, failed, no_data = [], [], [], []

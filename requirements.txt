@@ -8,4 +8,6 @@ baostock
 plotly
 pyarrow
 PyYAML
+streamlit-autorefresh
+easyquotation
 pytest

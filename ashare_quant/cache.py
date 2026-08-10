@@ -22,13 +22,14 @@ class ParquetStore:
     def _path(self, symbol: str) -> Path:
         return self.root / f"{symbol}.parquet"
 
-    def save(self, symbol: str, df: pd.DataFrame) -> None:
+    def save(self, symbol: str, df: pd.DataFrame, update_manifest: bool = True) -> None:
         out = df.copy()
         out.index.name = "date"
         tmp = self._path(symbol).with_suffix(".parquet.tmp")
         out.to_parquet(tmp)
         os.replace(tmp, self._path(symbol))
-        self.update_manifest(symbol, out)
+        if update_manifest:
+            self.update_manifest(symbol, out)
 
     def load(self, symbol: str) -> pd.DataFrame | None:
         p = self._path(symbol)
@@ -36,11 +37,11 @@ class ParquetStore:
             return None
         return pd.read_parquet(p)
 
-    def append(self, symbol: str, df: pd.DataFrame) -> None:
+    def append(self, symbol: str, df: pd.DataFrame, update_manifest: bool = True) -> None:
         old = self.load(symbol)
         merged = df if old is None else pd.concat([old, df])
         merged = merged[~merged.index.duplicated(keep="last")].sort_index()
-        self.save(symbol, merged)
+        self.save(symbol, merged, update_manifest=update_manifest)
 
     def exists(self, symbol: str) -> bool:
         return self._path(symbol).exists()
@@ -70,3 +71,18 @@ class ParquetStore:
                 "rows": int(len(df)),
             }
             self.manifest_path.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def rebuild_manifest(self) -> dict:
+        """遍历缓存目录一次性重建 manifest（批量下载后调用，替代逐条写入）。"""
+        manifest = {}
+        for p in self.root.glob("*.parquet"):
+            df = pd.read_parquet(p, columns=[])  # 仅取索引，不加载数据列
+            manifest[p.stem] = {
+                "start": str(df.index.min().date()),
+                "end": str(df.index.max().date()),
+                "rows": int(len(df)),
+            }
+        with self._manifest_lock:
+            self.manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        return manifest

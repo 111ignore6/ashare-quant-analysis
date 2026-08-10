@@ -15,6 +15,9 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
+
+from ashare_quant.realtime import snapshot
 
 PROJECT = Path(__file__).parent
 DISCLAIMER = "模拟研究，仅用于数据分析与学习，不构成投资建议。"
@@ -95,6 +98,15 @@ def load_json(path: Path):
     if not Path(path).exists():
         return None
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+@st.cache_data(ttl=600)
+def load_panel_close(data_dir: Path):
+    """读取面板缓存中的收盘价矩阵（date × symbol）。"""
+    p = data_dir / "panels" / "close.parquet"
+    if not p.exists():
+        return None
+    return pd.read_parquet(p)
 
 
 def equity_figure(returns: pd.DataFrame) -> go.Figure:
@@ -189,8 +201,8 @@ with st.sidebar:
     st.divider()
     st.caption(DISCLAIMER)
 
-tab_overview, tab_sim, tab_decision, tab_algo, tab_log, tab_data = st.tabs(
-    ["总览", "模拟盘", "今日决策", "算法对比", "调整日志", "数据状态"])
+tab_overview, tab_sim, tab_decision, tab_realtime, tab_algo, tab_log, tab_data = st.tabs(
+    ["总览", "模拟盘", "今日决策", "实时行情", "算法对比", "调整日志", "数据状态"])
 
 data_dir = PROJECT / data_root
 model_dir = PROJECT / "models" / mode
@@ -287,6 +299,43 @@ with tab_decision:
                 lambda v: f"{v:.1%}" if pd.notna(v) else "-")
         st.dataframe(picks, width="stretch")
         st.caption("预期收益为多模型预测的未来 20 个交易日收益均值，模拟研究仅供学习。")
+
+with tab_realtime:
+    st.subheader("实时行情（准实时快照，秒级延迟）")
+    st.caption("免费行情源为快照级（延迟数秒），非交易所级 tick 数据；"
+               "仅供盘中观察与持仓跟踪，不改变月度调仓决策逻辑。")
+    auto = st.toggle("自动刷新（每 10 秒）", value=False)
+    if auto:
+        st_autorefresh(interval=10_000, key="realtime_refresh")
+    if decision is None or not decision.get("picks"):
+        st.info("暂无持仓，先在「总览」运行「每日更新」生成决策。")
+    else:
+        symbols = [p["symbol"] for p in decision["picks"]]
+        try:
+            snap = snapshot(symbols)
+            if snap.empty:
+                st.warning("未获取到实时行情（可能非交易时段或接口限流），"
+                           "可切换数据源重试。")
+            else:
+                close_panel = load_panel_close(data_dir)
+                if close_panel is not None and pd.Timestamp(decision["date"]) in close_panel.index:
+                    base = close_panel.loc[pd.Timestamp(decision["date"]), snap["代码"]]
+                    snap["决策日收盘"] = base.to_numpy()
+                    snap["自决策日涨跌"] = snap["现价"] / snap["决策日收盘"] - 1
+                    snap["自决策日涨跌"] = snap["自决策日涨跌"].map(
+                        lambda v: f"{v:+.2%}" if pd.notna(v) else "-")
+                    snap["决策日收盘"] = snap["决策日收盘"].map(
+                        lambda v: f"{v:.2f}" if pd.notna(v) else "-")
+                snap["涨跌幅"] = snap["涨跌幅"].map(lambda v: f"{v:+.2%}")
+                for col in ("现价", "今开", "最高", "最低", "昨收"):
+                    if col in snap.columns:
+                        snap[col] = snap[col].map(
+                            lambda v: f"{v:.2f}" if pd.notna(v) else "-")
+                st.dataframe(snap, width="stretch")
+                st.caption(f"决策日期 {decision['date']}，共 {len(snap)} 只；"
+                           "「自决策日涨跌」为现价相对决策日收盘的变化。")
+        except Exception as e:  # noqa: BLE001
+            st.error(f"实时行情获取失败：{e}")
 
 with tab_algo:
     st.subheader("算法表现对比（样本外夏普）")
