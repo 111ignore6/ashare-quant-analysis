@@ -30,8 +30,8 @@ python -m ashare_quant.cli research                            # 生成研究报
 .\scripts\start.ps1 all          # 完整一条龙：数据→模拟→决策→仪表盘
 ```
 
-首次使用：下载全市场数据约 20-35 分钟（可断点续传，中断后重跑自动续传）；
-之后每日增量更新通常几秒到一分钟。
+首次使用：下载全市场数据约 8-15 分钟（默认腾讯源，可断点续传）；
+之后每日增量更新通常 1-3 秒。
 
 计划任务仍可选用 `.\scripts\schedule_daily.ps1`（周一至五 16:05 自动运行）。
 
@@ -81,11 +81,12 @@ python -m streamlit run dashboard.py
 - **因子**：`ashare_quant/research/factors.py` 用 `@register_factor("name")` 注册，
   签名 `(close, volume, **params)`，`compute_factors` 自动收集；
 - **数据源**：`ashare_quant/fetchers/registry.py` 用 `register_source("name", module)`
-  注册，`config.yaml` 里 `data_source` / `fallback_source` 切换主备源。
+  注册，`config.yaml` 里 `data_source` / `fallback_source` 切换主备源
+  （默认 `tencent`：直连腾讯行情，实测并发 12 约 22 只/秒，是新浪源的 4 倍以上）。
 
 内置状态：模型 7 个（linear/rf/lgbm/histgb/svm/knn/mlp）、因子 5 个
-（momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 2 个
-（akshare/baostock）。
+（momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 3 个
+（tencent/akshare/baostock）。
 
 ## 成品使用（一条龙）
 

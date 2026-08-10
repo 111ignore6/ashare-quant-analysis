@@ -1,6 +1,6 @@
 ﻿param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
-    [string]$DataRoot = "$ProjectRoot\data\all",
+    [string]$DataRoot = "$ProjectRoot\data\tencent",
     [string]$OutDir = "$ProjectRoot\docs\simulation"
 )
 

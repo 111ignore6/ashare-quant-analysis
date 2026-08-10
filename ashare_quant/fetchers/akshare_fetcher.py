@@ -57,7 +57,7 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
     return _normalize(raw)
 
 
-def fetch_index_daily(symbol: str = "sh000300") -> pd.DataFrame:
+def fetch_index_daily(symbol: str = "sh000300", start: str | None = None) -> pd.DataFrame:
     """沪深指数日线（用于交易日历与市场状态研究）。"""
     import akshare as ak
 

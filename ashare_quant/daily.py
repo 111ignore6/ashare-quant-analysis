@@ -61,9 +61,22 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
         fetcher, _, _ = resolve_fetchers(cfg)
     manifest = store.read_manifest()
     prev_index_end = manifest.get(index_symbol, {}).get("end")
-    idx_df = index_fetcher(index_symbol)
-    store.append(index_symbol, idx_df)
-    last = idx_df.index.max()
+    idx_start = (pd.Timestamp(prev_index_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d") \
+        if prev_index_end else None
+    try:
+        idx_df = index_fetcher(index_symbol, idx_start)
+    except TypeError:
+        # 兼容只接受 symbol 的旧签名数据源
+        idx_df = index_fetcher(index_symbol)
+    if idx_df is not None and not idx_df.empty:
+        store.append(index_symbol, idx_df)
+        last = idx_df.index.max()
+    elif prev_index_end:
+        last = pd.Timestamp(prev_index_end)
+    else:
+        return {"new_index_date": None, "updated": [], "up_to_date": [],
+                "failed": sorted(codes), "no_data": [], "new_data": False,
+                "stale": 0, "error": "指数数据获取失败"}
     if prev_index_end and str(last.date()) == prev_index_end:
         # 指数无新交易日，但上次更新可能中断：检查股票是否落后，落后则补齐
         stale = [c for c in codes

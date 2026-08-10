@@ -179,8 +179,8 @@ st.caption(DISCLAIMER)
 
 with st.sidebar:
     st.subheader("数据范围")
-    data_root = st.selectbox("数据集", ["data/all", "data/3y"], index=0)
-    mode = "all" if data_root == "data/all" else "3y"
+    data_root = st.selectbox("数据集", ["data/tencent", "data/all", "data/3y"], index=0)
+    mode = "all" if data_root in ("data/tencent", "data/all") else "3y"
     sim_dir = PROJECT / ("docs/simulation-all" if mode == "all" else "docs/simulation")
     st.caption(f"数据目录：{PROJECT / data_root}")
     st.divider()

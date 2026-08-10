@@ -1,5 +1,7 @@
-data_root: data/all
+data_root: data/tencent
 universe_mode: all      # csi300 | all
+data_source: tencent    # tencent(快) | akshare | baostock
+fallback_source: akshare
 years: 3
 adjust: qfq
 max_workers: 6

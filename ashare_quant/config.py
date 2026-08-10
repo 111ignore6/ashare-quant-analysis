@@ -10,8 +10,8 @@ import yaml
 class Config:
     data_root: Path = Path("data")
     universe_mode: str = "csi300"
-    data_source: str = "akshare"
-    fallback_source: str = "baostock"
+    data_source: str = "tencent"
+    fallback_source: str = "akshare"
     years: int = 3
     adjust: str = "qfq"
     max_workers: int = 8

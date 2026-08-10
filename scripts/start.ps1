@@ -6,7 +6,7 @@
 # A股量化研究·模拟分析系统 - 一键启动（模拟研究，不构成投资建议）
 Set-Location $ProjectRoot
 
-$DataRoot = Join-Path $ProjectRoot "data\all"
+$DataRoot = Join-Path $ProjectRoot "data\tencent"
 $OutDir = Join-Path $ProjectRoot "docs\simulation"
 $ModelDir = Join-Path $ProjectRoot "models\all"
 $Config = Join-Path $ProjectRoot "config.yaml"
