@@ -353,12 +353,33 @@ with tab_account:
         st.info("暂无账户曲线，运行「每日更新」生成首个正式决策后开始记录。")
     else:
         col = equity.columns[0]
+        initial = float(acc_summary["initial_capital"]) if acc_summary else 100000.0
+        start = equity.index[0]
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=equity.index, y=equity[col], mode="lines",
                                  name="账户净值", line=dict(color="#2980b9")))
-        fig.update_layout(title="账户净值曲线（元）", xaxis_title="日期",
+        # 真实基准：沪深300 与等权全市场（同起点归一化到初始资金）
+        idx_path = data_dir / "sh000300.parquet"
+        if idx_path.exists():
+            idx_close = pd.read_parquet(idx_path)["close"]
+            idx_sel = idx_close.loc[start:]
+            if len(idx_sel) >= 2:
+                bench = initial * idx_sel / idx_sel.iloc[0]
+                fig.add_trace(go.Scatter(x=bench.index, y=bench, name="基准·沪深300",
+                                         line=dict(dash="dash", color="#7f8c8d")))
+        if close_panel is not None and start in close_panel.index:
+            eq_ret = close_panel.loc[start:].mean(axis=1)
+            if len(eq_ret) >= 2:
+                bench2 = initial * eq_ret / eq_ret.iloc[0]
+                fig.add_trace(go.Scatter(x=bench2.index, y=bench2,
+                                         name="基准·等权全市场",
+                                         line=dict(dash="dash", color="#95a5a6")))
+        fig.update_layout(title="账户净值曲线（元，虚线为真实基准）", xaxis_title="日期",
                           yaxis_title="总资产（元）", hovermode="x unified")
         st.plotly_chart(fig, width="stretch")
+        if len(equity) < 5:
+            st.info("账户刚刚开始记录（当前仅 1 个交易日），曲线会随每日更新逐步成形；"
+                    "想看完整历史策略表现，请切换到「模拟盘」页。")
         if acc_summary:
             a1, a2, a3, a4, a5 = st.columns(5)
             a1.metric("总资产", f"{acc_summary['total_asset']:,.0f} 元")
