@@ -10,4 +10,5 @@ pyarrow
 PyYAML
 streamlit-autorefresh
 easyquotation
+mootdx
 pytest

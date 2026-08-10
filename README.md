@@ -14,6 +14,9 @@ python -m ashare_quant.cli research                            # 生成研究报
 
 ## 一键启动（日常使用）
 
+**最省事**：双击根目录 `启动系统.bat` —— 自动做每日增量更新 → 启动仪表盘 → 打开浏览器。
+首次使用（还没有数据）会提示先用 `start.bat` 下载。
+
 **推荐使用控制台**：运行 `python -m streamlit run dashboard.py`（或 `.\scripts\start.ps1 dashboard`），
 打开 http://localhost:8501 —— 总览页直接显示数据状态、落后股票、模型/持仓状态，
 点击按钮即可下载/更新数据（后台运行、输出实时显示），无需记命令。
@@ -88,12 +91,14 @@ python -m streamlit run dashboard.py
 - **数据源**：`ashare_quant/fetchers/registry.py` 用 `register_source("name", module)`
   注册，`config.yaml` 里 `data_source` / `fallback_source` 切换主备源
   （默认 `tencent`：直连腾讯行情，实测并发 12 约 22 只/秒，是新浪源的 4 倍以上；
-  更新时主源失败自动切备源）。实时行情用 [easyquotation](https://github.com/shidenggui/easyquotation)
+  更新时主源失败自动切备源）。另可选 `mootdx`（通达信协议，1.06k★，单次 800 根
+  ~0.1s，自算前复权，与腾讯复权口径约有 1% 绝对价差、收益率影响可忽略）。
+  实时行情用 [easyquotation](https://github.com/shidenggui/easyquotation)
   （5.3k★）腾讯/新浪快照。
 
 内置状态：模型 7 个（linear/rf/lgbm/histgb/svm/knn/mlp）、因子 5 个
-（momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 3 个
-（tencent/akshare/baostock）。
+（momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 4 个
+（tencent/mootdx/akshare/baostock）。
 
 ## 成品使用（一条龙）
 
