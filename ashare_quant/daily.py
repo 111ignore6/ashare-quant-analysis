@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import time
 
 import pandas as pd
+from tqdm import tqdm
 
 from .cache import ParquetStore
 from .config import Config
@@ -19,6 +21,36 @@ def needs_update(store: ParquetStore, index_symbol: str = "sh000300") -> bool:
     return last_trading_day(store, index_symbol) is None
 
 
+def _symbol_end(manifest: dict, store: ParquetStore, code: str):
+    """股票的本地数据截止日（manifest 缺失时回退读文件）。"""
+    entry = manifest.get(code, {})
+    if entry.get("end"):
+        return pd.Timestamp(entry["end"])
+    old = store.load(code)
+    return old.index.max() if old is not None and len(old) else None
+
+
+def _load_failed_cache(store: ParquetStore) -> dict:
+    """读取当日失败冷却表（code -> 失败日期字符串）。"""
+    p = store.root / "update_failed.json"
+    if not p.exists():
+        return {}
+    try:
+        import json
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return {}
+
+
+def _save_failed_cache(store: ParquetStore, failed: dict) -> None:
+    import json
+    p = store.root / "update_failed.json"
+    try:
+        p.write_text(json.dumps(failed, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                  index_fetcher=None, fetcher=None, index_symbol: str = "sh000300") -> dict:
     if index_fetcher is None:
@@ -33,33 +65,67 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
     store.append(index_symbol, idx_df)
     last = idx_df.index.max()
     if prev_index_end and str(last.date()) == prev_index_end:
+        # 指数无新交易日，但上次更新可能中断：检查股票是否落后，落后则补齐
+        stale = [c for c in codes
+                 if (end := _symbol_end(manifest, store, c)) is None or end < last]
+        if not stale:
+            return {"new_index_date": str(last.date()), "updated": [], "up_to_date": "all",
+                    "failed": [], "new_data": False, "stale": 0}
+        codes_to_update = stale
+    else:
+        codes_to_update = codes
+
+    # 失败冷却：当天已失败过的股票不再反复重试（停牌/接口异常），次日自动重试
+    today = str(pd.Timestamp.today().normalize().date())
+    failed_cache = _load_failed_cache(store)
+    cooldown = {c for c, d in failed_cache.items() if d == today}
+    codes_to_update = [c for c in codes_to_update if c not in cooldown]
+    if prev_index_end and str(last.date()) == prev_index_end and not codes_to_update:
         return {"new_index_date": str(last.date()), "updated": [], "up_to_date": "all",
-                "failed": [], "new_data": False}
+                "failed": [], "new_data": False, "stale": len(stale)}
 
     def _update_one(code: str) -> tuple[str, str]:
-        try:
-            entry = manifest.get(code, {})
-            end_ts = pd.Timestamp(entry["end"]) if entry.get("end") else None
-            if end_ts is None:
-                old = store.load(code)
-                end_ts = old.index.max() if old is not None else None
+        # akshare 内部请求可能无限挂起：外层守卫强制超时（20s/次）
+        def _fetch_attempt() -> str:
+            end_ts = _symbol_end(manifest, store, code)
             if end_ts is None:
                 start = (pd.Timestamp.today().normalize() - pd.DateOffset(years=cfg.years)).strftime("%Y%m%d")
             else:
                 if end_ts >= last:
-                    return "up_to_date", code
+                    return "up_to_date"
                 start = (end_ts + pd.Timedelta(days=1)).strftime("%Y%m%d")
             df = fetcher(code, start, str(last).replace("-", ""), cfg.adjust)
             if not df.empty:
                 store.append(code, df)
-                return "updated", code
-            return "up_to_date", code
-        except Exception:
-            return "failed", code
+                return "updated"
+            return "no_data"
 
-    updated, up_to_date, failed = [], [], []
+        for attempt in range(max(1, cfg.retry)):
+            try:
+                with ThreadPoolExecutor(max_workers=1) as guard:
+                    fut = guard.submit(_fetch_attempt)
+                    status = fut.result(timeout=20)
+                return status, code
+            except TimeoutError:
+                continue
+            except Exception:
+                if attempt == max(1, cfg.retry) - 1:
+                    return "failed", code
+                time.sleep(0.5)
+        return "failed", code
+
+    updated, up_to_date, failed, no_data = [], [], [], []
     with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:
-        for status, code in ex.map(_update_one, codes):
-            {"updated": updated, "up_to_date": up_to_date, "failed": failed}[status].append(code)
+        for status, code in tqdm(ex.map(_update_one, codes_to_update),
+                                 total=len(codes_to_update),
+                                 desc="增量更新", unit="只",
+                                 disable=len(codes_to_update) < 50):
+            {"updated": updated, "up_to_date": up_to_date, "failed": failed,
+             "no_data": no_data}[status].append(code)
+    if failed or no_data:
+        failed_cache.update({c: today for c in failed + no_data})
+        _save_failed_cache(store, failed_cache)
     return {"new_index_date": str(last.date()), "updated": sorted(updated),
-            "up_to_date": sorted(up_to_date), "failed": sorted(failed), "new_data": True}
+            "up_to_date": sorted(up_to_date), "failed": sorted(failed),
+            "no_data": sorted(no_data), "new_data": True,
+            "stale": len(codes_to_update)}

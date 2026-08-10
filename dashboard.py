@@ -57,7 +57,7 @@ METRIC_NAMES = {
     "n_periods": "期数",
 }
 
-PICK_NAMES = {"symbol": "代码", "score": "得分", "weight": "权重"}
+PICK_NAMES = {"symbol": "代码", "score": "预期收益(20日)", "weight": "权重"}
 
 
 def display_name(name: str) -> str:
@@ -141,8 +141,15 @@ with tab2:
         model_names = "、".join(display_name(m) for m in decision["models"])
         st.write(f"决策日期：{decision['date']}　持仓 {len(decision['picks'])} 只　"
                  f"模型：{model_names}")
-        st.dataframe(pd.DataFrame(decision["picks"]).rename(columns=PICK_NAMES),
-                     width='stretch')
+        picks = pd.DataFrame(decision["picks"]).rename(columns=PICK_NAMES)
+        if "预期收益(20日)" in picks.columns:
+            picks["预期收益(20日)"] = picks["预期收益(20日)"].map(
+                lambda v: f"{v:.2%}" if pd.notna(v) else "-")
+        if "权重" in picks.columns:
+            picks["权重"] = picks["权重"].map(
+                lambda v: f"{v:.1%}" if pd.notna(v) else "-")
+        st.dataframe(picks, width='stretch')
+        st.caption("预期收益为多模型预测的未来 20 个交易日收益均值，模拟研究仅供学习。")
 
 with tab3:
     st.subheader("算法表现对比（样本外夏普）")

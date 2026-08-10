@@ -30,7 +30,7 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
     import akshare as ak
 
     old_timeout = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(30)
+    socket.setdefaulttimeout(12)
     try:
         raw = ak.stock_zh_a_daily(
             symbol=to_sina_code(symbol),

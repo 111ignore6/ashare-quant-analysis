@@ -54,7 +54,7 @@ def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher, fallback=No
 
 def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
                       fetcher=None, universe_name: str = "csi300",
-                      progress_every: int = 500, fallback_fetcher=None) -> dict:
+                      progress_every: int = 100, fallback_fetcher=None) -> dict:
     if fetcher is None:
         from .fetchers import resolve_fetchers
         fetcher, _, fallback = resolve_fetchers(cfg)
@@ -69,7 +69,7 @@ def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
         for fut in as_completed(futures):
             done += 1
             if done % progress_every == 0:
-                print(f"progress {done}/{len(codes)}")
+                print(f"progress {done}/{len(codes)}", flush=True)
             status = fut.result()
             counts.setdefault(status, []).append(futures[fut])
     result = {"universe": universe_name, **counts}

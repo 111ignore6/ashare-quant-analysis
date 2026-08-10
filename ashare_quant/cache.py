@@ -46,7 +46,15 @@ class ParquetStore:
         return self._path(symbol).exists()
 
     def symbols(self) -> list[str]:
-        return sorted(p.stem for p in self.root.glob("*.parquet"))
+        """数据目录里的标的代码（排除特征/面板等缓存文件）。"""
+        out = []
+        for p in self.root.glob("*.parquet"):
+            stem = p.stem
+            if len(stem) == 6 and stem.isdigit():
+                out.append(stem)
+            elif len(stem) > 2 and stem[:2] in ("sh", "sz", "bj") and stem[2:].isdigit():
+                out.append(stem)
+        return sorted(out)
 
     def read_manifest(self) -> dict:
         if not self.manifest_path.exists():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -32,11 +33,17 @@ def cmd_fetch(args) -> None:
         cfg.data_root = Path(args.data_root)
     codes = load_universe(cfg.universe_mode)
     store = ParquetStore(cfg.data_root)
+    print(f"开始下载 {len(codes)} 只（数据目录 {cfg.data_root}），约需 "
+          f"{len(codes) // max(1, cfg.max_workers) * 1 // 60 + 1} 分钟，请耐心等待…",
+          flush=True)
     res = download_universe(codes, store, cfg, universe_name=cfg.universe_mode)
-    print(f"universe={res['universe']} ok={len(res['ok'])} skipped={len(res['skipped'])} "
-          f"failed={len(res['failed'])} no_data={len(res['no_data'])} rows={res['rows']}")
+    print(f"下载完成：成功 {len(res['ok'])}，已存在 {len(res['skipped'])}，"
+          f"失败 {len(res['failed'])}，无数据 {len(res['no_data'])}，"
+          f"共 {res['rows']} 行", flush=True)
     if res["failed"]:
-        print("failed:", ",".join(res["failed"][:20]))
+        print("失败股票：", ",".join(res["failed"][:20]), flush=True)
+        if len(res["failed"]) > 20:
+            print(f"……共 {len(res['failed'])} 只失败，可重跑 fetch 命令重试", flush=True)
 
 
 def cmd_research(args) -> None:
@@ -207,11 +214,19 @@ def cmd_daily(args) -> None:
     out = update_daily(codes, store, cfg)
     n_up = len(out["up_to_date"]) if isinstance(out["up_to_date"], list) else "all"
     print(f"指数截止={out['new_index_date']} 更新={len(out['updated'])} "
-          f"已最新={n_up} 失败={len(out['failed'])}")
+          f"已最新={n_up} 失败={len(out['failed'])}", flush=True)
+    if out.get("stale"):
+        print(f"检测到 {out['stale']} 只股票数据落后（上次更新可能中断），"
+              f"已补齐 {len(out['updated'])} 只", flush=True)
     if out["failed"]:
-        print("failed:", ",".join(out["failed"][:20]))
+        print("更新失败：", ",".join(out["failed"][:20]), flush=True)
+        if len(out["failed"]) > 20:
+            print(f"……共 {len(out['failed'])} 只失败，可重跑 daily 重试", flush=True)
+    if out.get("no_data"):
+        print(f"无数据（可能停牌/未上市）：{len(out['no_data'])} 只，"
+              f"如 {','.join(out['no_data'][:5])}…，已跳过今日", flush=True)
     if not out.get("new_data", True) and not args.force:
-        print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）")
+        print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）", flush=True)
         return
     panels = build_panels(store)
     _build_html_report(cfg, store, args.out_dir, panels=panels)
@@ -333,6 +348,11 @@ def cmd_decision(args) -> None:
 
 
 def main(argv=None) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", write_through=True)
+        except (AttributeError, ValueError, OSError):
+            pass
     p = argparse.ArgumentParser(prog="ashare_quant", description="A股量化研究·模拟分析（研究阶段）")
     sub = p.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch", help="下载行情到本地缓存")
