@@ -147,17 +147,24 @@ _TASK_QUEUES: dict[str, queue.Queue] = {}
 
 def _task_worker(key: str, cmd: list[str], cwd: Path) -> None:
     q = _TASK_QUEUES[key]
+    log_dir = cwd / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_f = open(log_dir / f"{key}.log", "a", encoding="utf-8")
     try:
         proc = subprocess.Popen(
             cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1)
         for line in proc.stdout:
+            log_f.write(line + "\n")
+            log_f.flush()
             q.put(("line", line.rstrip()))
         proc.wait()
         q.put(("done", proc.returncode))
     except Exception as e:  # noqa: BLE001
         q.put(("line", f"启动失败：{e}"))
         q.put(("done", -1))
+    finally:
+        log_f.close()
 
 
 def launch_task(key: str, cmd: list[str], cwd: Path) -> None:
@@ -191,6 +198,8 @@ def render_task(key: str, title: str) -> bool:
         with st.status(f"{title} 进行中…", expanded=True) as status:
             tail = state["lines"][-30:]
             st.code("\n".join(tail) if tail else "等待输出…（长任务请耐心等待）")
+        # 任务运行中每 5 秒自动刷新页面，实时显示进度
+        st_autorefresh(interval=5000, key=f"task_refresh_{key}")
         return True
     if state["code"] == 0:
         st.success(f"{title} 完成")
@@ -318,8 +327,10 @@ with tab_sim:
         st.plotly_chart(equity_figure(returns), width="stretch")
         st.subheader("累计总收益（近三年模拟）")
         cum = (1 + returns.fillna(0)).prod() - 1
-        cols = st.columns(len(cum))
-        for col, (name, v) in zip(cols, cum.items()):
+        # 只显示策略（基准线已在净值曲线中，避免把大盘涨幅当策略收益）
+        strategy_cum = cum[[c for c in cum.index if not str(c).startswith("基准")]]
+        cols = st.columns(len(strategy_cum))
+        for col, (name, v) in zip(cols, strategy_cum.items()):
             col.metric(display_name(name), f"{v:+.2%}")
         sim_json = load_json(sim_dir / "simulation.json")
         if sim_json and "summary" in sim_json:
