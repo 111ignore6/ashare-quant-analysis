@@ -71,6 +71,7 @@ def decide(models: dict, X: pd.DataFrame, close: pd.DataFrame,
         raise ValueError(f"日期 {date} 无特征数据")
     preds = pd.DataFrame({name: m.predict(rows) for name, m in models["models"].items()},
                          index=rows.index)
+    model_names = list(preds.columns)
     mean_pred = preds.mean(axis=1)
     threshold = np.mean(list(models["meta"]["thresholds"].values()))
     if threshold > 0:
@@ -81,5 +82,11 @@ def decide(models: dict, X: pd.DataFrame, close: pd.DataFrame,
     table = pd.DataFrame({"symbol": score.index.get_level_values("symbol"),
                           "score": score.values}).sort_values("score", ascending=False)
     picks = table.head(top_n).copy()
+    # 决策解释：记录每只股票的各模型预测明细
+    picks["model_scores"] = [
+        {name: round(float(preds.loc[(pd.Timestamp(date), sym), name]), 4)
+         for name in model_names}
+        for sym in picks["symbol"]
+    ]
     picks["weight"] = 1.0 / len(picks)
     return picks.reset_index(drop=True)

@@ -211,6 +211,7 @@ def cmd_daily(args) -> None:
     codes = load_universe_cached(
         cfg.universe_mode, cache_path=cfg.data_root / "universe.json",
         extra=local_symbols)
+    print("阶段 1/3：增量更新行情数据（有进度条，首次/大涨后约 1-5 分钟）…", flush=True)
     out = update_daily(codes, store, cfg)
     n_up = len(out["up_to_date"]) if isinstance(out["up_to_date"], list) else "all"
     print(f"指数截止={out['new_index_date']} 更新={len(out['updated'])} "
@@ -229,8 +230,10 @@ def cmd_daily(args) -> None:
         print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）", flush=True)
         return
     panels = build_panels(store)
+    print("阶段 2/3：生成报告与模拟盘（约 20 秒）…", flush=True)
     _build_html_report(cfg, store, args.out_dir, panels=panels)
     if not args.no_decision:
+        print("阶段 3/3：训练/加载模型并生成今日决策…", flush=True)
         _save_decision(cfg, store, args.model_dir, args.sample_size,
                        args.retrain, args.out_dir, panels=panels)
     print(f"当日报告已生成: {args.out_dir}/report.html")
@@ -323,6 +326,7 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
     payload = {
         "date": str(last_date.date()),
         "top_n": int(len(picks)),
+        "initial_capital": float(cfg.initial_capital),
         "models": loaded["meta"]["models"],
         "thresholds": loaded["meta"]["thresholds"],
         "picks": picks.to_dict(orient="records"),

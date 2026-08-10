@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+from ashare_quant.account import account_snapshot
 from ashare_quant.realtime import snapshot
 
 PROJECT = Path(__file__).parent
@@ -223,6 +224,19 @@ with tab_overview:
     c3.metric("落后股票", f"{len(stale)} 只")
     c4.metric("今日持仓", f"{len(decision['picks'])} 只" if decision else "—")
 
+    close_panel = load_panel_close(data_dir)
+    account = account_snapshot(decision, close_panel) \
+        if decision and close_panel is not None else None
+    if account:
+        st.subheader("模拟账户")
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("初始资金", f"{account['initial']:,.0f} 元")
+        a2.metric("总资产", f"{account['total_asset']:,.0f} 元")
+        a3.metric("总收益率", f"{account['total_return']:+.2%}")
+        a4.metric("浮动盈亏", f"{account['total_pnl']:+,.0f} 元")
+        st.caption(f"按决策日 {decision['date']} 收盘买入、最新收盘价 {account['as_of']} 估值；"
+                   "模拟研究，不构成投资建议。")
+
     if not manifest:
         st.warning("尚未下载数据。首次使用请点击下方「下载全市场数据」——"
                    "约 20-35 分钟，可断点续传（中断后重跑自动续传）。")
@@ -278,6 +292,11 @@ with tab_sim:
         st.info("未找到模拟盘结果，在「总览」运行「每日更新」或模拟盘命令后生成。")
     else:
         st.plotly_chart(equity_figure(returns), width="stretch")
+        st.subheader("累计总收益（近三年模拟）")
+        cum = (1 + returns.fillna(0)).prod() - 1
+        cols = st.columns(len(cum))
+        for col, (name, v) in zip(cols, cum.items()):
+            col.metric(display_name(name), f"{v:+.2%}")
         sim_json = load_json(sim_dir / "simulation.json")
         if sim_json and "summary" in sim_json:
             st.dataframe(format_metric(pd.DataFrame(sim_json["summary"])), width="stretch")
@@ -299,6 +318,29 @@ with tab_decision:
                 lambda v: f"{v:.1%}" if pd.notna(v) else "-")
         st.dataframe(picks, width="stretch")
         st.caption("预期收益为多模型预测的未来 20 个交易日收益均值，模拟研究仅供学习。")
+        if account:
+            st.subheader("账户持仓明细")
+            pos = account["rows"].copy()
+            pos["权重"] = pos["权重"].map(lambda v: f"{v:.1%}")
+            pos["投入金额"] = pos["投入金额"].map(lambda v: f"{v:,.0f}")
+            pos["股数"] = pos["股数"].map(lambda v: f"{v:,.0f}")
+            pos["成本价"] = pos["成本价"].map(lambda v: f"{v:.2f}")
+            pos["现价"] = pos["现价"].map(lambda v: f"{v:.2f}")
+            pos["市值"] = pos["市值"].map(lambda v: f"{v:,.0f}")
+            pos["浮动盈亏"] = pos["浮动盈亏"].map(lambda v: f"{v:+,.0f}")
+            pos["盈亏率"] = pos["盈亏率"].map(lambda v: f"{v:+.2%}")
+            st.dataframe(pos, width="stretch")
+        with st.expander("模型预测明细（为什么选这些股票）"):
+            st.caption("每只股票在 LGBM / 梯度提升 / SVM 三个模型下的未来 20 日预期收益，"
+                       "最终得分为三模型均值经置信度加权。")
+            detail = pd.DataFrame(decision["picks"]).copy()
+            if "model_scores" in detail.columns and detail["model_scores"].notna().any():
+                scores = pd.json_normalize(detail["model_scores"].dropna().tolist())
+                detail = pd.concat([detail[["symbol", "score"]], scores], axis=1)
+                detail = detail.rename(columns={"symbol": "代码", "score": "加权得分"})
+                st.dataframe(detail, width="stretch")
+            else:
+                st.info("当前决策文件缺少模型明细，重新运行 daily 后自动生成。")
 
 with tab_realtime:
     st.subheader("实时行情（准实时快照，秒级延迟）")

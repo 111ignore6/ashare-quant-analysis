@@ -9,3 +9,4 @@ retry: 3
 rate_limit_per_second: 2
 top_n: 50
 rebalance: M
+initial_capital: 100000    # 模拟账户初始资金（元），仪表盘据此计算总资产/收益

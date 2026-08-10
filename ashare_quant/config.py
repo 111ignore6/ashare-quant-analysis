@@ -19,6 +19,7 @@ class Config:
     rate_limit_per_second: float = 2.0
     top_n: int = 50
     rebalance: str = "M"
+    initial_capital: float = 100000.0
 
     @classmethod
     def from_dict(cls, d: dict) -> "Config":

@@ -63,7 +63,7 @@ def save_feature_cache(X: pd.DataFrame, y: pd.Series, path: Path, as_of) -> None
     path.parent.mkdir(parents=True, exist_ok=True)
     out = X.copy()
     out["target"] = y
-    out.to_parquet(path)
+    out.to_parquet(path, compression="zstd")
     (path.with_suffix(".meta.json")).write_text(
         json.dumps({"as_of": str(pd.Timestamp(as_of).date()), "n_rows": int(len(X))},
                    ensure_ascii=False), encoding="utf-8")
