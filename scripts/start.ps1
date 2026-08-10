@@ -120,6 +120,7 @@ while ($true) {
     Write-Host " 5) 生成历史数据研究报告"
     Write-Host " 6) 启动仪表盘"
     Write-Host " 7) 完整一条龙（数据->模拟->决策->仪表盘）"
+    Write-Host " 8) 每日自动更新：查看/开启/关闭（默认开启）"
     Write-Host " 0) 退出"
     $choice = Read-Host "请选择"
     switch ($choice) {
@@ -130,6 +131,13 @@ while ($true) {
         "5" { Start-Research }
         "6" { Start-Dashboard }
         "7" { Start-All }
+        "8" {
+            & (Join-Path $PSScriptRoot "toggle_auto_update.ps1") -Action status
+            $opt = Read-Host "输入 on 开启 / off 关闭（直接回车返回）"
+            if ($opt -eq "on" -or $opt -eq "off") {
+                & (Join-Path $PSScriptRoot "toggle_auto_update.ps1") -Action $opt
+            }
+        }
         "0" { Write-Host "再见"; exit 0 }
         default { Write-Host "无效输入，请重新选择" -ForegroundColor Yellow }
     }

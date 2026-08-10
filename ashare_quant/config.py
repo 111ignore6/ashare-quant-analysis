@@ -22,6 +22,7 @@ class Config:
     initial_capital: float = 100000.0
     stop_loss: float | None = None
     take_profit: float | None = None
+    auto_update: bool = True
 
     @classmethod
     def from_dict(cls, d: dict) -> "Config":

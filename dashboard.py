@@ -111,6 +111,21 @@ def load_panel_close(data_dir: Path):
     return pd.read_parquet(p)
 
 
+@st.cache_data(ttl=60)
+def auto_update_status() -> str:
+    """读取 Windows 计划任务状态（只读）。"""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-ScheduledTask -TaskName 'AshareQuantDaily').State"],
+            capture_output=True, text=True, timeout=10)
+        state = r.stdout.strip()
+        return "开启" if state == "Ready" else ("关闭" if state == "Disabled" else state or "未注册")
+    except Exception:  # noqa: BLE001
+        return "未知"
+
+
 def equity_figure(returns: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     equity = (1 + returns.fillna(0)).cumprod()
@@ -237,6 +252,7 @@ with tab_overview:
         a4.metric("浮动盈亏", f"{account['total_pnl']:+,.0f} 元")
         st.caption(f"按决策日 {decision['date']} 收盘买入、最新收盘价 {account['as_of']} 估值；"
                    "模拟研究，不构成投资建议。")
+    st.caption(f"每日自动更新：{auto_update_status()}（可在 start.bat 菜单 8 切换，默认开启）")
 
     if not manifest:
         st.warning("尚未下载数据。首次使用请点击下方「下载全市场数据」——"
