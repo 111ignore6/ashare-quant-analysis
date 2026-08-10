@@ -20,6 +20,8 @@ class Config:
     top_n: int = 50
     rebalance: str = "M"
     initial_capital: float = 100000.0
+    stop_loss: float | None = None
+    take_profit: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "Config":

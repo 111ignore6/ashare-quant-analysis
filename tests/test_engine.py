@@ -45,3 +45,28 @@ def test_engine_costs_reduce_returns():
     res_no = run_backtest(score, close, open_, dates, top_n=5, commission=0.0, stamp=0.0, slippage=0.0)
     res_yes = run_backtest(score, close, open_, dates, top_n=5)
     assert res_yes.returns.mean() < res_no.returns.mean()
+
+
+def test_engine_stop_loss_limits_loss():
+    """持仓单只连续下跌时，止损版在 -20% 离场，损失小于持有到底。"""
+    close, open_ = _market(n_days=110, n_stocks=10, seed=7)
+    crash_start = close.index[25]
+    base = close.loc[close.index[24], "S0000"]
+    # 从 crash_start 起每个交易日 -2%，覆盖整个持仓周期且不再反弹
+    n_crash = 18
+    for k in range(n_crash):
+        t = close.index[close.index.get_loc(crash_start) + k]
+        close.loc[t, "S0000"] = base * (0.98 ** (k + 1))
+        open_.loc[t, "S0000"] = base * (0.98 ** (k + 1))
+    tail = close.index[close.index.get_loc(crash_start) + n_crash:]
+    last = base * (0.98 ** n_crash)
+    close.loc[tail, "S0000"] = last
+    open_.loc[tail, "S0000"] = last
+    # 固定评分：每期都选 S0000（确保下跌发生时处于持仓中）
+    score = pd.DataFrame(0.0, index=close.index, columns=close.columns)
+    score["S0000"] = 1.0
+    dates = monthly_rebalance_dates(close.index)
+    res_no = run_backtest(score, close, open_, dates, top_n=1)
+    res_stop = run_backtest(score, close, open_, dates, top_n=1,
+                            stop_loss=-0.20)
+    assert res_stop.returns.mean() > res_no.returns.mean()

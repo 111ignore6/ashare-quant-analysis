@@ -144,7 +144,8 @@ def cmd_simulate(args) -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = out_dir / "adjustments.jsonl"
-    sim = run_simulation(models, close, open_, volume, top_n=cfg.top_n, log_path=log_path)
+    sim = run_simulation(models, close, open_, volume, top_n=cfg.top_n, log_path=log_path,
+                         stop_loss=cfg.stop_loss, take_profit=cfg.take_profit)
     simulation_to_markdown(sim["summary"], sim["log"].read(), out_dir / "simulation.md")
     (out_dir / "simulation.json").write_text(
         json.dumps({"summary": sim["summary"].to_dict(orient="records"),
@@ -174,7 +175,8 @@ def _build_html_report(cfg, store, out_dir, panels=None) -> None:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     sim = run_simulation(models, close, open_, volume, top_n=cfg.top_n,
-                         log_path=out_dir / "adjustments.jsonl")
+                         log_path=out_dir / "adjustments.jsonl",
+                         stop_loss=cfg.stop_loss, take_profit=cfg.take_profit)
     all_returns = _simulation_full_returns(close, index_close, sim)
     all_returns.to_csv(out_dir / "model_returns.csv", encoding="utf-8-sig")
     summary = factor_report(close, volume)["ic_summary"]

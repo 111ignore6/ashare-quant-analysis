@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import yaml
 from streamlit_autorefresh import st_autorefresh
 
 from ashare_quant.account import account_snapshot
@@ -287,6 +288,13 @@ with tab_overview:
 with tab_sim:
     st.subheader("模拟盘对比（月度调仓 Top-50，含交易成本）")
     st.caption("虚线为真实市场基准：等权全市场与沪深300 指数买入持有。")
+    risk_cfg = yaml.safe_load((PROJECT / "config.yaml").read_text(encoding="utf-8")) \
+        if (PROJECT / "config.yaml").exists() else None
+    if risk_cfg and (risk_cfg.get("stop_loss") is not None or risk_cfg.get("take_profit") is not None):
+        sl = risk_cfg.get("stop_loss")
+        tp = risk_cfg.get("take_profit")
+        st.caption(f"仓位风控已启用：止损 {sl:+.0%}、止盈 {tp:+.0%}"
+                   f"（config.yaml 可调，None 关闭）。")
     returns = load_csv(sim_dir / "model_returns.csv")
     if returns is None:
         st.info("未找到模拟盘结果，在「总览」运行「每日更新」或模拟盘命令后生成。")

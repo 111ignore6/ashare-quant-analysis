@@ -10,3 +10,5 @@ rate_limit_per_second: 2
 top_n: 50
 rebalance: M
 initial_capital: 100000    # 模拟账户初始资金（元），仪表盘据此计算总资产/收益
+stop_loss: -0.15           # 单只持仓较成本回撤超过 15% 止损（None 关闭）
+take_profit: 0.30          # 单只持仓较成本上涨超过 30% 止盈（None 关闭）

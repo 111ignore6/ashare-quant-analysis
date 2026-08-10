@@ -11,13 +11,16 @@ from .feedback.rotation import rotate_weights
 
 def run_simulation(models: dict[str, object], close: pd.DataFrame, open_: pd.DataFrame,
                    volume: pd.DataFrame, top_n: int = 50,
-                   log_path=None, window: int = 6, threshold: float = 0.15) -> dict:
+                   log_path=None, window: int = 6, threshold: float = 0.15,
+                   stop_loss: float | None = None,
+                   take_profit: float | None = None) -> dict:
     dates = monthly_rebalance_dates(close.index)
     model_returns = {}
     holdings = {}
     for name, model in models.items():
         score = model.score(close, volume)
-        res = run_backtest(score, close, open_, dates, top_n=top_n)
+        res = run_backtest(score, close, open_, dates, top_n=top_n,
+                           stop_loss=stop_loss, take_profit=take_profit)
         model_returns[name] = res.returns
         holdings[name] = res.holdings
     rets = pd.DataFrame(model_returns)

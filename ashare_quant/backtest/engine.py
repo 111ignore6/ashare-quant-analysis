@@ -23,11 +23,17 @@ def _next_trading_day(dates, d):
 def run_backtest(score: pd.DataFrame, close: pd.DataFrame, open_: pd.DataFrame,
                  rebalance_dates, top_n: int = 50, commission: float = 0.00025,
                  stamp: float = 0.0005, slippage: float = 0.001,
-                 limit: float = 0.098) -> BacktestResult:
-    """月度调仓：信号日选股，次日开盘成交；持仓数量记账，市值法算收益；T+1 由持有期隐含满足。"""
+                 limit: float = 0.098, stop_loss: float | None = None,
+                 take_profit: float | None = None) -> BacktestResult:
+    """月度调仓：信号日选股，次日开盘成交；持仓数量记账，市值法算收益；T+1 由持有期隐含满足。
+
+    stop_loss / take_profit：持仓期间按收盘价相对买入成本触发，次日开盘卖出
+    （跌停无法卖出时继续持有）。阈值为相对成本的比例，如 -0.15 / 0.30。
+    """
     signal_dates = [d for d in rebalance_dates if d in score.index]
     rets, turnovers, holdings = {}, {}, {}
     shares: dict[str, float] = {}
+    cost: dict[str, float] = {}
     prev_holdings: set[str] = set()
     prev_value: float | None = None
     cash = 1.0  # 初始资金
@@ -71,6 +77,7 @@ def run_backtest(score: pd.DataFrame, close: pd.DataFrame, open_: pd.DataFrame,
                 buy_px = px(s) * (1 + slippage) * (1 + commission)
                 if buy_px > 0:
                     shares[s] = budget / buy_px
+                    cost[s] = buy_px
                     cash -= budget
         # 4) 记录换手与持仓，更新期初基准值（交易后市值）
         held = set(shares)
@@ -79,5 +86,36 @@ def run_backtest(score: pd.DataFrame, close: pd.DataFrame, open_: pd.DataFrame,
             holdings[d] = sorted(held)
         prev_holdings = held
         prev_value = cash + sum(shares[s] * px(s) for s in shares if not pd.isna(px(s)))
+
+        # 风控扫描：调仓日之间的交易日，按收盘价相对成本触发止盈止损，次日开盘卖出
+        if (stop_loss is not None or take_profit is not None) and shares:
+            period = close.index[(close.index > exec_day) & (close.index < next_exec)]
+            prev_close = close.shift(1)
+            for t in period:
+                for s in list(shares):
+                    c = cost.get(s)
+                    if c is None or c <= 0:
+                        continue
+                    px_t = close.loc[t, s]
+                    if pd.isna(px_t):
+                        continue
+                    chg = px_t / c - 1
+                    trigger = (stop_loss is not None and chg <= stop_loss) or \
+                              (take_profit is not None and chg >= take_profit)
+                    if not trigger:
+                        continue
+                    sell_day = _next_trading_day(close.index, t)
+                    if sell_day is None:
+                        continue
+                    price = open_.loc[sell_day, s]
+                    if pd.isna(price):
+                        price = prev_close.loc[sell_day, s]
+                    if pd.isna(price):
+                        continue
+                    if price < prev_close.loc[sell_day, s] * (1 - limit):
+                        continue  # 跌停卖不出，继续持有
+                    cash += shares[s] * price * (1 - slippage) * (1 - commission - stamp)
+                    del shares[s]
+                    cost.pop(s, None)
     r = pd.Series(rets)
     return BacktestResult(returns=r, equity=(1 + r).cumprod(), turnover=pd.Series(turnovers), holdings=holdings)
