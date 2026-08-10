@@ -335,6 +335,12 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
     (out_dir / "decision.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     picks.to_csv(out_dir / "decision.csv", index=False, encoding="utf-8-sig")
+    # 决策历史追踪：回填历史调仓日 + 记录当日 + 更新账户净值曲线
+    from .portfolio import update_portfolio
+    summary = update_portfolio(close, cfg, cfg.data_root / "portfolio",
+                               decision=payload)
+    print(f"账户曲线已更新：决策 {summary['decisions']} 次，"
+          f"总收益率 {summary['total_return']:+.2%}", flush=True)
     print(f"决策日期: {last_date.date()}  持仓 {len(picks)} 只")
     print(picks.head(20).to_string(index=False))
     print(f"决策已保存: {out_dir}/decision.json")

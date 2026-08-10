@@ -202,8 +202,8 @@ with st.sidebar:
     st.divider()
     st.caption(DISCLAIMER)
 
-tab_overview, tab_sim, tab_decision, tab_realtime, tab_algo, tab_log, tab_data = st.tabs(
-    ["总览", "模拟盘", "今日决策", "实时行情", "算法对比", "调整日志", "数据状态"])
+tab_overview, tab_sim, tab_decision, tab_account, tab_realtime, tab_algo, tab_log, tab_data = st.tabs(
+    ["总览", "模拟盘", "今日决策", "账户", "实时行情", "算法对比", "调整日志", "数据状态"])
 
 data_dir = PROJECT / data_root
 model_dir = PROJECT / "models" / mode
@@ -341,6 +341,36 @@ with tab_decision:
                 st.dataframe(detail, width="stretch")
             else:
                 st.info("当前决策文件缺少模型明细，重新运行 daily 后自动生成。")
+
+with tab_account:
+    st.subheader("模拟账户净值（自首个正式决策日跟踪）")
+    st.caption("账户自首个正式决策日（样本外）开始逐日盯市值；"
+               "决策每日收盘后生成，收益随每日更新持续累积。"
+               "历史策略表现请参考「模拟盘」页。")
+    equity = load_csv(data_dir / "portfolio" / "account_equity.csv")
+    acc_summary = load_json(data_dir / "portfolio" / "account_summary.json")
+    if equity is None or equity.empty:
+        st.info("暂无账户曲线，运行「每日更新」生成首个正式决策后开始记录。")
+    else:
+        col = equity.columns[0]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=equity.index, y=equity[col], mode="lines",
+                                 name="账户净值", line=dict(color="#2980b9")))
+        fig.update_layout(title="账户净值曲线（元）", xaxis_title="日期",
+                          yaxis_title="总资产（元）", hovermode="x unified")
+        st.plotly_chart(fig, width="stretch")
+        if acc_summary:
+            a1, a2, a3, a4, a5 = st.columns(5)
+            a1.metric("总资产", f"{acc_summary['total_asset']:,.0f} 元")
+            a2.metric("总收益率", f"{acc_summary['total_return']:+.2%}")
+            a3.metric("年化收益", f"{acc_summary['annual_return']:+.2%}")
+            a4.metric("夏普", f"{acc_summary['sharpe']:.2f}")
+            a5.metric("最大回撤", f"{acc_summary['max_drawdown']:.2%}")
+            st.caption(f"已记录 {acc_summary['decisions']} 次决策，"
+                       f"数据截至 {acc_summary['as_of']}。")
+        csv_data = equity.to_csv().encode("utf-8-sig")
+        st.download_button("下载账户净值 CSV", data=csv_data,
+                           file_name="account_equity.csv", mime="text/csv")
 
 with tab_realtime:
     st.subheader("实时行情（准实时快照，秒级延迟）")
