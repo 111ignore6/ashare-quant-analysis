@@ -3,10 +3,22 @@ from __future__ import annotations
 import socket
 
 import pandas as pd
+import requests
 
 _RENAME = {"日期": "date", "开盘": "open", "最高": "high", "最低": "low",
            "收盘": "close", "成交量": "volume", "成交额": "amount"}
 _COLS = ["open", "high", "low", "close", "volume", "amount"]
+
+# akshare 内部请求不传 timeout，默认会无限挂起；这里统一注入默认超时。
+_ORIG_SESSION_REQUEST = requests.sessions.Session.request
+
+
+def _request_with_default_timeout(self, method, url, **kwargs):
+    kwargs.setdefault("timeout", 12)
+    return _ORIG_SESSION_REQUEST(self, method, url, **kwargs)
+
+
+requests.sessions.Session.request = _request_with_default_timeout
 
 
 def to_sina_code(symbol: str) -> str:
@@ -30,7 +42,7 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
     import akshare as ak
 
     old_timeout = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(12)
+    socket.setdefaulttimeout(8)
     try:
         raw = ak.stock_zh_a_daily(
             symbol=to_sina_code(symbol),

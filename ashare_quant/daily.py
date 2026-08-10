@@ -85,7 +85,6 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 "failed": [], "new_data": False, "stale": len(stale)}
 
     def _update_one(code: str) -> tuple[str, str]:
-        # akshare 内部请求可能无限挂起：外层守卫强制超时（20s/次）
         def _fetch_attempt() -> str:
             end_ts = _symbol_end(manifest, store, code)
             if end_ts is None:
@@ -102,12 +101,7 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
 
         for attempt in range(max(1, cfg.retry)):
             try:
-                with ThreadPoolExecutor(max_workers=1) as guard:
-                    fut = guard.submit(_fetch_attempt)
-                    status = fut.result(timeout=20)
-                return status, code
-            except TimeoutError:
-                continue
+                return _fetch_attempt(), code
             except Exception:
                 if attempt == max(1, cfg.retry) - 1:
                     return "failed", code

@@ -14,16 +14,24 @@ python -m ashare_quant.cli research                            # 生成研究报
 
 ## 一键启动（日常使用）
 
-双击项目根目录的 `start.bat` 进入中文菜单，或用 PowerShell 直接指定动作：
+**推荐使用控制台**：运行 `python -m streamlit run dashboard.py`（或 `.\scripts\start.ps1 dashboard`），
+打开 http://localhost:8501 —— 总览页直接显示数据状态、落后股票、模型/持仓状态，
+点击按钮即可下载/更新数据（后台运行、输出实时显示），无需记命令。
+
+命令行方式（自动化/计划任务）：
 
 ```powershell
 .\scripts\start.ps1 daily        # 每日：增量更新 + 报告 + 决策
 .\scripts\start.ps1 force        # 强制重算报告与决策
+.\scripts\start.ps1 fetch        # 下载/更新全市场数据
 .\scripts\start.ps1 simulate     # 模拟盘回测（含反馈调整）
 .\scripts\start.ps1 research     # 生成历史数据研究报告
 .\scripts\start.ps1 dashboard    # 启动仪表盘（http://localhost:8501）
 .\scripts\start.ps1 all          # 完整一条龙：数据→模拟→决策→仪表盘
 ```
+
+首次使用：下载全市场数据约 20-35 分钟（可断点续传，中断后重跑自动续传）；
+之后每日增量更新通常几秒到一分钟。
 
 计划任务仍可选用 `.\scripts\schedule_daily.ps1`（周一至五 16:05 自动运行）。
 
@@ -55,11 +63,14 @@ python -m ashare_quant.cli benchmark --data-root data/all   # 算法表现对比
 python -m ashare_quant.cli decision --data-root data/all    # 训练模型并生成当日模拟持仓
 ```
 
-## 仪表盘
+## 控制台（仪表盘）
 
 ```bash
 python -m streamlit run dashboard.py
 ```
+
+- **总览**：状态卡片（股票数/数据截止/落后数/持仓）、一键操作（每日更新/强制重算/下载数据，后台运行实时输出）、今日持仓前 10；
+- **模拟盘 / 今日决策 / 算法对比 / 调整日志 / 数据状态**：净值曲线（含沪深300 与等权全市场真实基准）、预期收益、样本外夏普与算法净值、权重调整日志、数据清单与失败清单。
 
 ## 扩展机制（便于后续开发维护）
 

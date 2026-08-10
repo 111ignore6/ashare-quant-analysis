@@ -1,11 +1,15 @@
-"""Streamlit 仪表盘。
+"""A股量化研究·模拟分析控制台（Streamlit 单页应用）。
 
 运行： python -m streamlit run dashboard.py
+功能：状态总览 / 数据���载与更新（后台任务+实时输出）/ 模拟盘 / 今日决策 / 算法对比 / 日志。
 """
 
 from __future__ import annotations
 
 import json
+import queue
+import subprocess
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -107,36 +111,169 @@ def equity_figure(returns: pd.DataFrame) -> go.Figure:
     return fig
 
 
-st.set_page_config(page_title="A股量化研究·模拟分析", layout="wide")
-st.title("A股量化研究 · 模拟分析仪表盘")
+# ---------- 后台任务管理：在页面内直接跑数据下载/更新，实时回显输出 ----------
+
+_TASK_QUEUES: dict[str, queue.Queue] = {}
+
+
+def _task_worker(key: str, cmd: list[str], cwd: Path) -> None:
+    q = _TASK_QUEUES[key]
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1)
+        for line in proc.stdout:
+            q.put(("line", line.rstrip()))
+        proc.wait()
+        q.put(("done", proc.returncode))
+    except Exception as e:  # noqa: BLE001
+        q.put(("line", f"启动失败：{e}"))
+        q.put(("done", -1))
+
+
+def launch_task(key: str, cmd: list[str], cwd: Path) -> None:
+    """启动一个后台任务（幂等：同一 key 运行中不重复启动）。"""
+    state = st.session_state.setdefault("task_state", {}).setdefault(
+        key, {"lines": [], "running": False, "code": None})
+    if state["running"]:
+        return
+    _TASK_QUEUES[key] = queue.Queue()
+    state.update({"lines": [], "running": True, "code": None})
+    threading.Thread(target=_task_worker, args=(key, cmd, cwd), daemon=True).start()
+
+
+def render_task(key: str, title: str) -> bool:
+    """渲染任务进度；返回是否仍在运行。"""
+    state = st.session_state.setdefault("task_state", {}).setdefault(
+        key, {"lines": [], "running": False, "code": None})
+    q = _TASK_QUEUES.get(key)
+    if q is not None:
+        while True:
+            try:
+                kind, payload = q.get_nowait()
+            except queue.Empty:
+                break
+            if kind == "line":
+                state["lines"].append(payload)
+            elif kind == "done":
+                state["running"] = False
+                state["code"] = payload
+    if state["running"]:
+        with st.status(f"{title} 进行中…", expanded=True) as status:
+            tail = state["lines"][-30:]
+            st.code("\n".join(tail) if tail else "等待输出…（长任务请耐心等待）")
+        return True
+    if state["code"] == 0:
+        st.success(f"{title} 完成")
+    elif state["code"] is not None:
+        st.error(f"{title} 失败（退出码 {state['code']}）")
+    if state["lines"]:
+        with st.expander("查看完整输出"):
+            st.code("\n".join(state["lines"]))
+    return False
+
+
+st.set_page_config(page_title="A股量化研究·模拟分析控制台", layout="wide")
+st.title("A股量化研究 · 模拟分析控制台")
 st.caption(DISCLAIMER)
 
 with st.sidebar:
-    data_root = st.selectbox("数据范围", ["data/all", "data/3y"], index=0)
+    st.subheader("数据范围")
+    data_root = st.selectbox("数据集", ["data/all", "data/3y"], index=0)
     mode = "all" if data_root == "data/all" else "3y"
     sim_dir = PROJECT / ("docs/simulation-all" if mode == "all" else "docs/simulation")
-    st.caption(f"数据目录：{data_root}")
+    st.caption(f"数据目录：{PROJECT / data_root}")
+    st.divider()
+    st.caption("使用方式：在「总览」页点击按钮即可下载/更新数据，"
+               "任务在后台运行、输出实时显示，刷新页面不中断。")
+    st.divider()
+    st.caption(DISCLAIMER)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["模拟盘", "今日决策", "算法对比", "调整日志", "数据状态"])
+tab_overview, tab_sim, tab_decision, tab_algo, tab_log, tab_data = st.tabs(
+    ["总览", "模拟盘", "今日决策", "算法对比", "调整日志", "数据状态"])
 
-with tab1:
+data_dir = PROJECT / data_root
+model_dir = PROJECT / "models" / mode
+
+with tab_overview:
+    st.subheader("系统状态与快速操作")
+    manifest = load_json(data_dir / "manifest.json") if data_dir.exists() else None
+    model_meta = load_json(model_dir / "meta.json")
+    decision = load_json(PROJECT / "docs/decision" / "decision.json")
+    stocks = {k: v for k, v in (manifest or {}).items() if k != "sh000300"}
+    idx_end = (manifest or {}).get("sh000300", {}).get("end")
+    stale = [k for k, v in stocks.items()
+             if v.get("end") and idx_end and v["end"] < idx_end]
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("覆盖股票", f"{len(stocks)} 只")
+    c2.metric("数据截止", idx_end or "无数据")
+    c3.metric("落后股票", f"{len(stale)} 只")
+    c4.metric("今日持仓", f"{len(decision['picks'])} 只" if decision else "—")
+
+    if not manifest:
+        st.warning("尚未下载数据。首次使用请点击下方「下载全市场数据」——"
+                   "约 20-35 分钟，可断点续传（中断后重跑自动续传）。")
+    elif stale:
+        st.info(f"有 {len(stale)} 只股票数据落后（可能上次更新中断或停牌），"
+                "点击「每日更新」自动补齐。")
+    elif not model_meta:
+        st.info("模型尚未训练，点击「每日更新」会自动训练（约 1 分钟）。")
+    else:
+        st.success("数据与模型就绪。每日收盘后点击「每日更新」："
+                   "增量拉数据 → 生成报告 → 输出今日模拟持仓。")
+
+    cmd_base = ["python", "-X", "utf8", "-u", "-m", "ashare_quant.cli"]
+    b1, b2, b3 = st.columns(3)
+    if b1.button("每日更新（推荐）", type="primary", width="stretch"):
+        launch_task("daily", cmd_base + ["daily", "--config", str(PROJECT / "config.yaml"),
+                                         "--data-root", str(data_dir), "--out-dir", str(sim_dir),
+                                         "--model-dir", str(model_dir)], PROJECT)
+    if b2.button("强制重算报告+决策", width="stretch"):
+        launch_task("force", cmd_base + ["daily", "--config", str(PROJECT / "config.yaml"),
+                                         "--data-root", str(data_dir), "--out-dir", str(sim_dir),
+                                         "--model-dir", str(model_dir), "--force"], PROJECT)
+    if b3.button("下载/更新全市场数据（首次 20-35 分钟）", width="stretch"):
+        launch_task("fetch", cmd_base + ["fetch", "--config", str(PROJECT / "config.yaml"),
+                                         "--universe", "all", "--data-root", str(data_dir),
+                                         "--years", "3"], PROJECT)
+    render_task("daily", "每日更新")
+    render_task("force", "强制重算")
+    render_task("fetch", "全市场数据下载")
+
+    st.divider()
+    st.subheader("今日模拟持仓（前 10）")
+    if decision:
+        picks = pd.DataFrame(decision["picks"]).rename(columns=PICK_NAMES).head(10)
+        if "预期收益(20日)" in picks.columns:
+            picks["预期收益(20日)"] = picks["预期收益(20日)"].map(
+                lambda v: f"{v:.2%}" if pd.notna(v) else "-")
+        if "权重" in picks.columns:
+            picks["权重"] = picks["权重"].map(
+                lambda v: f"{v:.1%}" if pd.notna(v) else "-")
+        st.dataframe(picks, width="stretch")
+        st.caption(f"决策日期 {decision['date']}，模型："
+                   f"{'、'.join(display_name(m) for m in decision['models'])}。"
+                   "预期收益为多模型预测的未来 20 个交易日收益均值。")
+    else:
+        st.info("暂无决策结果，运行「每日更新」后生成。")
+
+with tab_sim:
     st.subheader("模拟盘对比（月度调仓 Top-50，含交易成本）")
     st.caption("虚线为真实市场基准：等权全市场与沪深300 指数买入持有。")
     returns = load_csv(sim_dir / "model_returns.csv")
     if returns is None:
-        st.info(f"未找到模拟盘结果，请先运行：`python -m ashare_quant.cli simulate --data-root {data_root}`")
+        st.info("未找到模拟盘结果，在「总览」运行「每日更新」或模拟盘命令后生成。")
     else:
-        st.plotly_chart(equity_figure(returns), width='stretch')
+        st.plotly_chart(equity_figure(returns), width="stretch")
         sim_json = load_json(sim_dir / "simulation.json")
         if sim_json and "summary" in sim_json:
-            st.dataframe(format_metric(pd.DataFrame(sim_json["summary"])), width='stretch')
+            st.dataframe(format_metric(pd.DataFrame(sim_json["summary"])), width="stretch")
 
-with tab2:
+with tab_decision:
     st.subheader("今日模拟投资决策")
-    decision = load_json(PROJECT / "docs/decision" / "decision.json")
     if decision is None:
-        st.info(f"未找到决策结果，请先运行：`python -m ashare_quant.cli decision --data-root {data_root}`")
+        st.info("未找到决策结果，在「总览」运行「每日更新」后生成。")
     else:
         model_names = "、".join(display_name(m) for m in decision["models"])
         st.write(f"决策日期：{decision['date']}　持仓 {len(decision['picks'])} 只　"
@@ -148,33 +285,34 @@ with tab2:
         if "权重" in picks.columns:
             picks["权重"] = picks["权重"].map(
                 lambda v: f"{v:.1%}" if pd.notna(v) else "-")
-        st.dataframe(picks, width='stretch')
+        st.dataframe(picks, width="stretch")
         st.caption("预期收益为多模型预测的未来 20 个交易日收益均值，模拟研究仅供学习。")
 
-with tab3:
+with tab_algo:
     st.subheader("算法表现对比（样本外夏普）")
     bench_stem = "algorithm-benchmark-all" if mode == "all" else "algorithm-benchmark"
     bench = load_json(PROJECT / "docs/research" / f"{bench_stem}.json")
     if bench is None:
-        st.info("未找到算法对比结果，请先运行：`python -m ashare_quant.cli benchmark --data-root {0}`".format(data_root))
+        st.info("未找到算法对比结果，运行 benchmark 命令后生成（全市场约 6 分钟）。")
     else:
         df = pd.DataFrame(bench).sort_values("sharpe", ascending=False)
         fig = go.Figure(go.Bar(x=df["model"], y=df["sharpe"],
-                               marker_color=["#c0392b" if v >= 2 else "#2980b9" for v in df["sharpe"]]))
+                               marker_color=["#c0392b" if v >= 2 else "#2980b9"
+                                             for v in df["sharpe"]]))
         fig.update_layout(title="各算法样本外夏普", xaxis_title="模型", yaxis_title="夏普",
                           xaxis_tickangle=-30)
         fig.data[0].x = [display_name(m) for m in df["model"]]
-        st.plotly_chart(fig, width='stretch')
-        st.dataframe(format_metric(df), width='stretch')
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(format_metric(df), width="stretch")
         returns = load_csv(PROJECT / "docs/research" / f"{bench_stem}.returns.csv")
         if returns is not None:
             st.subheader("各算法样本外净值曲线（含真实基准）")
             st.caption("虚线为真实市场基准；曲线为月度调仓 Top-50 等权的样本外净值。")
-            st.plotly_chart(equity_figure(returns), width='stretch')
+            st.plotly_chart(equity_figure(returns), width="stretch")
         else:
-            st.info("暂无收益曲线数据，重跑 `benchmark` 命令后自动生成。")
+            st.info("暂无收益曲线数据，重跑 benchmark 命令后自动生成。")
 
-with tab4:
+with tab_log:
     st.subheader("反馈调整日志")
     LOG_NAMES = {"date": "日期", "trigger": "触发", "action": "动作",
                  "before": "调整前权重", "after": "调整后权重", "effect": "效果"}
@@ -182,26 +320,39 @@ with tab4:
     if not log_path.exists():
         st.info("暂无调整日志。")
     else:
-        entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        st.dataframe(pd.DataFrame(entries).rename(columns=LOG_NAMES), width='stretch')
+        entries = [json.loads(line) for line in
+                   log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        st.dataframe(pd.DataFrame(entries).rename(columns=LOG_NAMES), width="stretch")
 
-with tab5:
+with tab_data:
     st.subheader("数据状态")
-    data_dir = PROJECT / data_root
     if data_dir.exists():
         parquet = list(data_dir.glob("*.parquet"))
-        manifest = load_json(data_dir / "manifest.json")
+        manifest2 = load_json(data_dir / "manifest.json")
         st.write(f"股票/指数缓存文件数：{len(parquet)}")
-        st.write(f"数据清单（manifest）条目数：{len(manifest) if manifest else 0}")
-        if manifest:
-            stocks = {k for k in manifest if k != "sh000300"}
-            st.write(f"覆盖股票数：{len(stocks)}")
+        st.write(f"数据清单（manifest）条目数：{len(manifest2) if manifest2 else 0}")
+        if manifest2:
+            st.write(f"覆盖股票数：{len({k for k in manifest2 if k != 'sh000300'})}")
+            ends = {}
+            for k, v in manifest2.items():
+                if k == "sh000300":
+                    continue
+                ends.setdefault(v.get("end"), 0)
+                ends[v["end"]] += 1
+            st.write("股票数据截止日分布：" + "，".join(
+                f"{d}:{n}只" for d, n in sorted(ends.items())))
         index_path = data_dir / "sh000300.parquet"
         if index_path.exists():
             idx = pd.read_parquet(index_path)
             st.write(f"沪深300 指数数据截止：{idx.index.max().date()}　行数：{len(idx)}")
+        failed_path = data_dir / "update_failed.json"
+        if failed_path.exists():
+            failed = load_json(failed_path)
+            if failed:
+                st.warning(f"今日跳过（停牌/异常，次日自动重试）：{len(failed)} 只 "
+                           f"— {'、'.join(list(failed)[:10])}")
     else:
-        st.info(f"数据目录不存在，请先运行：`python -m ashare_quant.cli fetch --data-root {data_root}`")
+        st.info("数据目录不存在，在「总览」点击「下载/更新全市场数据」。")
 
 st.divider()
 st.caption(DISCLAIMER)

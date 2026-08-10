@@ -2,7 +2,7 @@ data_root: data/all
 universe_mode: all      # csi300 | all
 years: 3
 adjust: qfq
-max_workers: 12
+max_workers: 6
 retry: 3
 rate_limit_per_second: 2
 top_n: 50
