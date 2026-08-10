@@ -42,6 +42,20 @@ def test_symbols_excludes_cache_files(tmp_path):
     assert symbols == ["000001", "sh000300"]
 
 
+def test_rebuild_manifest_ignores_cache_files(tmp_path):
+    """rebuild_manifest 跳过 features 等非行情缓存（双层索引 parquet 会崩）。"""
+    store = ParquetStore(tmp_path)
+    store.save("000001", _df(["2024-01-02", "2024-01-03"], [10, 10.5]))
+    store.save("sh000300", _df(["2024-01-02", "2024-01-03"], [3000, 3010]))
+    idx = pd.MultiIndex.from_product(
+        [pd.to_datetime(["2024-01-02", "2024-01-03"]), ["000001"]],
+        names=["date", "symbol"])
+    pd.DataFrame({"ret_5": [1.0, 2.0]}, index=idx).to_parquet(tmp_path / "features.parquet")
+    m = store.rebuild_manifest()
+    assert set(m) == {"000001", "sh000300"}
+    assert m["000001"]["end"] == "2024-01-03"
+
+
 def test_update_daily_fills_stale_when_index_unchanged(tmp_path):
     """指数无新交易日，但股票落后（上次中断）时，应自动补齐。"""
     store, codes = _setup(tmp_path, n_stocks=3, index_end="2024-01-04")

@@ -10,6 +10,13 @@ import pandas as pd
 CANONICAL_COLUMNS = ["open", "high", "low", "close", "volume", "amount"]
 
 
+def is_symbol_stem(stem: str) -> bool:
+    """是否为股票/指数缓存文件（排除 features/panels 等缓存）。"""
+    if len(stem) == 6 and stem.isdigit():
+        return True
+    return len(stem) > 2 and stem[:2] in ("sh", "sz", "bj") and stem[2:].isdigit()
+
+
 class ParquetStore:
     """按 symbol 存 Parquet，manifest.json 记录区间与行数。"""
 
@@ -51,9 +58,7 @@ class ParquetStore:
         out = []
         for p in self.root.glob("*.parquet"):
             stem = p.stem
-            if len(stem) == 6 and stem.isdigit():
-                out.append(stem)
-            elif len(stem) > 2 and stem[:2] in ("sh", "sz", "bj") and stem[2:].isdigit():
+            if is_symbol_stem(stem):
                 out.append(stem)
         return sorted(out)
 
@@ -76,6 +81,8 @@ class ParquetStore:
         """遍历缓存目录一次性重建 manifest（批量下载后调用，替代逐条写入）。"""
         manifest = {}
         for p in self.root.glob("*.parquet"):
+            if not is_symbol_stem(p.stem):
+                continue  # 跳过 features/panels 等非行情缓存
             df = pd.read_parquet(p, columns=[])  # 仅取索引，不加载数据列
             manifest[p.stem] = {
                 "start": str(df.index.min().date()),
