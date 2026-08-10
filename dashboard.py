@@ -1,7 +1,7 @@
 """A股量化研究·模拟分析控制台（Streamlit 单页应用）。
 
 运行： python -m streamlit run dashboard.py
-功能：状态总览 / 数据���载与更新（后台任务+实时输出）/ 模拟盘 / 今日决策 / 算法对比 / 日志。
+功能：状态总览 / 数据下载与更新（后台任务+实时输出）/ 模拟盘 / 今日决策 / 算法对比 / 日志。
 """
 
 from __future__ import annotations
