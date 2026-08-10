@@ -11,7 +11,8 @@ def _returns():
 def test_metrics_keys_and_drawdown():
     r = _returns()
     m = metrics_from_returns(r, periods_per_year=12)
-    assert {"annual_return", "annual_vol", "sharpe", "max_drawdown", "win_rate"} <= set(m)
+    assert {"annual_return", "annual_vol", "sharpe", "max_drawdown", "win_rate",
+            "profit_loss_ratio", "calmar"} <= set(m)
     dd = drawdown_series(r)
     assert (dd <= 0).all()
     assert abs(m["max_drawdown"] - dd.min()) < 1e-9
@@ -22,3 +23,16 @@ def test_metrics_of_constant_gain():
     m = metrics_from_returns(r, periods_per_year=12)
     assert m["sharpe"] > 0
     assert m["max_drawdown"] == 0
+
+
+def test_profit_loss_ratio():
+    r = pd.Series([0.05, -0.02, 0.03, -0.01])
+    m = metrics_from_returns(r, periods_per_year=12)
+    assert abs(m["profit_loss_ratio"] - (0.04 / 0.015)) < 1e-9
+
+
+def test_plr_and_calmar_nan_on_no_losses():
+    import numpy as np
+    m = metrics_from_returns(pd.Series([0.01] * 12), periods_per_year=12)
+    assert np.isnan(m["profit_loss_ratio"])
+    assert np.isnan(m["calmar"])

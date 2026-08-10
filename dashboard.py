@@ -12,14 +12,19 @@ import subprocess
 import threading
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import yaml
+from plotly.subplots import make_subplots
 from streamlit_autorefresh import st_autorefresh
 
 from ashare_quant.account import account_snapshot
-from ashare_quant.realtime import snapshot
+from ashare_quant.config import update_config_yaml
+from ashare_quant.portfolio import (build_trade_ledger, load_history,
+                                    monthly_returns_table, recompute_account)
+from ashare_quant.realtime import index_snapshot, snapshot
 
 PROJECT = Path(__file__).parent
 DISCLAIMER = "模拟研究，仅用于数据分析与学习，不构成投资建议。"
@@ -109,6 +114,47 @@ def load_panel_close(data_dir: Path):
     if not p.exists():
         return None
     return pd.read_parquet(p)
+
+
+@st.cache_data(ttl=600)
+def load_symbol(data_dir: Path, code: str):
+    """读取单只股票本地日线（K线详情用，秒级）。"""
+    p = data_dir / f"{code}.parquet"
+    if not p.exists():
+        return None
+    return pd.read_parquet(p)
+
+
+def account_figure(equity: pd.Series, data_dir: Path,
+                   close_panel, capital: float) -> go.Figure:
+    """账户净值曲线 + 真实基准（沪深300 / 等权全市场）。"""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=equity.index, y=equity, mode="lines",
+                             name="账户净值", line=dict(color="#2980b9")))
+    start = equity.index[0]
+    idx_path = data_dir / "sh000300.parquet"
+    if idx_path.exists():
+        idx_close = pd.read_parquet(idx_path)["close"]
+        idx_sel = idx_close.loc[start:]
+        if len(idx_sel) >= 2:
+            bench = capital * idx_sel / idx_sel.iloc[0]
+            fig.add_trace(go.Scatter(x=bench.index, y=bench, name="基准·沪深300",
+                                     line=dict(dash="dash", color="#7f8c8d")))
+    if close_panel is not None and start in close_panel.index:
+        eq_ret = close_panel.loc[start:].mean(axis=1)
+        if len(eq_ret) >= 2:
+            bench2 = capital * eq_ret / eq_ret.iloc[0]
+            fig.add_trace(go.Scatter(x=bench2.index, y=bench2,
+                                     name="基准·等权全市场",
+                                     line=dict(dash="dash", color="#95a5a6")))
+    fig.update_layout(title="账户净值曲线（元，虚线为真实基准）", xaxis_title="日期",
+                      yaxis_title="总资产（元）", hovermode="x unified")
+    return fig
+
+
+def format_pct_nan(v) -> str:
+    """NaN 显示为 —，否则显示百分比。"""
+    return "—" if pd.isna(v) else f"{v:+.2%}"
 
 
 @st.cache_data(ttl=60)
@@ -228,6 +274,43 @@ with st.sidebar:
     mode = "all" if data_root in ("data/tencent", "data/all") else "3y"
     sim_dir = PROJECT / ("docs/simulation-all" if mode == "all" else "docs/simulation")
     st.caption(f"数据目录：{PROJECT / data_root}")
+    st.divider()
+    cfg_path = PROJECT / "config.yaml"
+    cfg_d = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) \
+        if cfg_path.exists() else {}
+    st.subheader("模拟参数")
+    capital = st.number_input(
+        "初始资金（元）", min_value=10000.0, max_value=100000000.0,
+        value=float(cfg_d.get("initial_capital", 100000.0)),
+        step=10000.0, format="%.0f")
+    top_n = st.slider("每期选股数量", 10, 200,
+                      int(cfg_d.get("top_n", 50)), step=5)
+    use_sl = st.toggle("启用止损", value=cfg_d.get("stop_loss") is not None)
+    sl = st.number_input("止损线（相对成本）", min_value=-0.50, max_value=0.0,
+                         value=float(cfg_d.get("stop_loss", -0.15)),
+                         step=0.01, format="%.2f", disabled=not use_sl)
+    use_tp = st.toggle("启用止盈", value=cfg_d.get("take_profit") is not None)
+    tp = st.number_input("止盈线（相对成本）", min_value=0.0, max_value=1.0,
+                         value=float(cfg_d.get("take_profit", 0.30)),
+                         step=0.01, format="%.2f", disabled=not use_tp)
+    src_names = ["tencent", "akshare", "mootdx", "baostock"]
+    try:
+        src_idx = src_names.index(str(cfg_d.get("data_source", "tencent")))
+    except ValueError:
+        src_idx = 0
+    data_source = st.selectbox("数据源", src_names, index=src_idx)
+    if st.button("保存参数到配置"):
+        update_config_yaml(
+            PROJECT / "config.yaml",
+            initial_capital=capital, top_n=top_n,
+            stop_loss=sl if use_sl else None,
+            take_profit=tp if use_tp else None,
+            data_source=data_source)
+        st.session_state["cfg_saved"] = True
+        st.rerun()
+    if st.session_state.pop("cfg_saved", False):
+        st.success("已保存到 config.yaml，下次「每日更新」生效（账户页已按新资金预览）。")
+    st.caption("提示：改资金只改变账户口径，不改变选股决策。")
     st.divider()
     st.caption("使用方式：在「总览」页点击按钮即可下载/更新数据，"
                "任务在后台运行、输出实时显示，刷新页面不中断。")
@@ -384,58 +467,170 @@ with tab_decision:
             else:
                 st.info("当前决策文件缺少模型明细，重新运行 daily 后自动生成。")
 
+        st.subheader("相对上一决策日变化")
+        history_path = data_dir / "portfolio" / "account_history.jsonl"
+        hist_all = load_history(history_path) if history_path.exists() else []
+        hist_live = [e for e in hist_all if e.get("mode") == "live"] or hist_all
+        if len(hist_live) >= 2:
+            cur_syms = {p["symbol"] for p in hist_live[-1].get("picks", [])}
+            prev_syms = {p["symbol"] for p in hist_live[-2].get("picks", [])}
+            diff_rows = [{"代码": s, "变化": "持有"} for s in sorted(cur_syms & prev_syms)]
+            diff_rows += [{"代码": s, "变化": "新增"} for s in sorted(cur_syms - prev_syms)]
+            diff_rows += [{"代码": s, "变化": "卖出"} for s in sorted(prev_syms - cur_syms)]
+            st.dataframe(pd.DataFrame(diff_rows, columns=["代码", "变化"]), width="stretch")
+        else:
+            st.caption("暂无上一决策日对比（账户刚开始记录）。")
+
+        st.subheader("个股K线（本地数据，最近 120 个交易日）")
+        sel = st.selectbox("选择个股", [p["symbol"] for p in decision["picks"]])
+        sym_df = load_symbol(data_dir, sel)
+        if sym_df is None or sym_df.empty:
+            st.info("本地无该股K线数据（可能为新上市或数据缺失）。")
+        else:
+            tail = sym_df.tail(120)
+            kfig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                                 vertical_spacing=0.03, row_heights=[0.75, 0.25])
+            kfig.add_trace(go.Candlestick(
+                x=tail.index, open=tail["open"], high=tail["high"],
+                low=tail["low"], close=tail["close"], name=sel), row=1, col=1)
+            for n in (5, 20, 60):
+                kfig.add_trace(go.Scatter(x=tail.index,
+                                          y=tail["close"].rolling(n).mean(),
+                                          name=f"MA{n}", line=dict(width=1)),
+                               row=1, col=1)
+            if "volume" in tail.columns:
+                kfig.add_trace(go.Bar(x=tail.index, y=tail["volume"],
+                                      name="成交量", marker_color="#bdc3c7"),
+                               row=2, col=1)
+            kfig.update_layout(title=f"{sel} K线（最近 {len(tail)} 个交易日）",
+                               height=560, xaxis_rangeslider_visible=False)
+            st.plotly_chart(kfig, width="stretch")
+
 with tab_account:
     st.subheader("模拟账户净值（自首个正式决策日跟踪）")
     st.caption("账户自首个正式决策日（样本外）开始逐日盯市值；"
                "决策每日收盘后生成，收益随每日更新持续累积。"
                "历史策略表现请参考「模拟盘」页。")
-    equity = load_csv(data_dir / "portfolio" / "account_equity.csv")
+    equity_csv = load_csv(data_dir / "portfolio" / "account_equity.csv")
     acc_summary = load_json(data_dir / "portfolio" / "account_summary.json")
-    if equity is None or equity.empty:
-        st.info("暂无账户曲线，运行「每日更新」生成首个正式决策后开始记录。")
+    history_path = data_dir / "portfolio" / "account_history.jsonl"
+    history = load_history(history_path) if history_path.exists() else []
+    close_panel = load_panel_close(data_dir)
+    if equity_csv is None or equity_csv.empty:
+        if acc_summary:
+            st.info("首个正式决策已生成，账户净值曲线将于下一交易日（每日更新后）开始记录。")
+            a1, a2, a3, a4, a5 = st.columns(5)
+            a1.metric("总资产", f"{acc_summary.get('total_asset', 0.0):,.0f} 元")
+            a2.metric("总收益率", f"{acc_summary.get('total_return', 0.0):+.2%}")
+            a3.metric("年化收益", format_pct_nan(acc_summary.get("annual_return", 0.0)))
+            a4.metric("夏普", f"{acc_summary.get('sharpe', 0.0):.2f}")
+            a5.metric("最大回撤", format_pct_nan(acc_summary.get("max_drawdown", 0.0)))
+            st.caption(f"已记录 {acc_summary.get('decisions', 0)} 次决策，"
+                       f"数据截至 {acc_summary.get('as_of', '-')}。")
+        else:
+            st.info("暂无账户曲线，运行「每日更新」生成首个正式决策后开始记录。")
     else:
-        col = equity.columns[0]
-        initial = float(acc_summary["initial_capital"]) if acc_summary else 100000.0
-        start = equity.index[0]
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=equity.index, y=equity[col], mode="lines",
-                                 name="账户净值", line=dict(color="#2980b9")))
-        # 真实基准：沪深300 与等权全市场（同起点归一化到初始资金）
-        idx_path = data_dir / "sh000300.parquet"
-        if idx_path.exists():
-            idx_close = pd.read_parquet(idx_path)["close"]
-            idx_sel = idx_close.loc[start:]
-            if len(idx_sel) >= 2:
-                bench = initial * idx_sel / idx_sel.iloc[0]
-                fig.add_trace(go.Scatter(x=bench.index, y=bench, name="基准·沪深300",
-                                         line=dict(dash="dash", color="#7f8c8d")))
-        if close_panel is not None and start in close_panel.index:
-            eq_ret = close_panel.loc[start:].mean(axis=1)
-            if len(eq_ret) >= 2:
-                bench2 = initial * eq_ret / eq_ret.iloc[0]
-                fig.add_trace(go.Scatter(x=bench2.index, y=bench2,
-                                         name="基准·等权全市场",
-                                         line=dict(dash="dash", color="#95a5a6")))
-        fig.update_layout(title="账户净值曲线（元，虚线为真实基准）", xaxis_title="日期",
-                          yaxis_title="总资产（元）", hovermode="x unified")
+        view_capital = float(capital)
+        hist_view = [e for e in history if e.get("mode") == "live"] or history
+        equity, metrics = recompute_account(hist_view, close_panel, view_capital) \
+            if close_panel is not None and hist_view else (pd.Series(dtype=float), {})
+        if equity.empty:
+            # 回退到已保存的 CSV 与 summary（如缺少面板/历史）
+            equity = equity_csv[equity_csv.columns[0]].astype(float)
+            metrics = acc_summary or {}
+            view_capital = float(acc_summary.get("initial_capital", view_capital)) \
+                if acc_summary else view_capital
+        fig = account_figure(equity, data_dir, close_panel, view_capital)
         st.plotly_chart(fig, width="stretch")
         if len(equity) < 5:
             st.info("账户刚刚开始记录（当前仅 1 个交易日），曲线会随每日更新逐步成形；"
                     "想看完整历史策略表现，请切换到「模拟盘」页。")
-        if acc_summary:
-            a1, a2, a3, a4, a5 = st.columns(5)
-            a1.metric("总资产", f"{acc_summary['total_asset']:,.0f} 元")
-            a2.metric("总收益率", f"{acc_summary['total_return']:+.2%}")
-            a3.metric("年化收益", f"{acc_summary['annual_return']:+.2%}")
-            a4.metric("夏普", f"{acc_summary['sharpe']:.2f}")
-            a5.metric("最大回撤", f"{acc_summary['max_drawdown']:.2%}")
-            st.caption(f"已记录 {acc_summary['decisions']} 次决策，"
-                       f"数据截至 {acc_summary['as_of']}。")
+        total_asset = float(equity.iloc[-1])
+        total_return = total_asset / view_capital - 1 if view_capital > 0 else 0.0
+        a1, a2, a3, a4, a5 = st.columns(5)
+        a1.metric("总资产", f"{total_asset:,.0f} 元")
+        a2.metric("总收益率", f"{total_return:+.2%}")
+        a3.metric("年化收益", format_pct_nan(metrics.get("annual_return")))
+        a4.metric("夏普", f"{metrics.get('sharpe', 0.0):.2f}")
+        a5.metric("最大回撤", format_pct_nan(metrics.get("max_drawdown")))
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("胜率", format_pct_nan(metrics.get("win_rate")))
+        b2.metric("盈亏比", f"{metrics.get('profit_loss_ratio', float('nan')):.2f}"
+                   if not pd.isna(metrics.get("profit_loss_ratio", float("nan"))) else "—")
+        b3.metric("年化波动", format_pct_nan(metrics.get("annual_vol")))
+        b4.metric("Calmar", f"{metrics.get('calmar', float('nan')):.2f}"
+                   if not pd.isna(metrics.get("calmar", float("nan"))) else "—")
+        decisions_n = (acc_summary or {}).get("decisions", len(hist_view))
+        as_of = (acc_summary or {}).get("as_of", str(equity.index[-1].date()))
+        st.caption(f"已记录 {decisions_n} 次决策，数据截至 {as_of}；"
+                   f"账户按侧边栏资金 {view_capital:,.0f} 元预览，"
+                   "保存参数后每日更新沿用新口径。")
+
+        # 账户 vs 基准同期收益对比
+        if len(equity) >= 2 and close_panel is not None:
+            start, end = equity.index[0], equity.index[-1]
+            bench_ret = {}
+            idx_path = data_dir / "sh000300.parquet"
+            if idx_path.exists():
+                idx_close = pd.read_parquet(idx_path)["close"]
+                idx_sel = idx_close.loc[start:end]
+                if len(idx_sel) >= 2:
+                    bench_ret["基准·沪深300"] = idx_sel.iloc[-1] / idx_sel.iloc[0] - 1
+            if start in close_panel.index:
+                eq_ret = close_panel.loc[start:end].mean(axis=1)
+                if len(eq_ret) >= 2:
+                    bench_ret["基准·等权全市场"] = eq_ret.iloc[-1] / eq_ret.iloc[0] - 1
+            st.subheader("同期收益对比（账户 vs 真实市场）")
+            cc = st.columns(1 + len(bench_ret))
+            cc[0].metric("模拟账户", f"{total_return:+.2%}")
+            for col, (name, v) in zip(cc[1:], bench_ret.items()):
+                col.metric(name, f"{v:+.2%}")
+
+        # 月度收益热力图
+        returns_v = equity.pct_change(fill_method=None).dropna()
+        monthly = monthly_returns_table(returns_v)
+        if not monthly.empty:
+            st.subheader("月度收益热力图")
+            mvals = monthly.values
+            text = np.vectorize(lambda v: f"{v:.1%}" if pd.notna(v) else "")(mvals)
+            hfig = go.Figure(go.Heatmap(
+                z=mvals * 100, x=[f"{m}月" for m in monthly.columns],
+                y=[str(y) for y in monthly.index], colorscale="RdYlGn", zmid=0,
+                text=text, texttemplate="%{text}",
+                hovertemplate="%{y}年 %{x}: %{z:.2f}%<extra></extra>"))
+            hfig.update_layout(title="月度收益（%）", height=max(220, 45 * len(monthly.index)),
+                               yaxis_title="年份")
+            st.plotly_chart(hfig, width="stretch")
+
+        # 交易台账
+        if close_panel is not None and hist_view:
+            ledger = build_trade_ledger(hist_view, close_panel, view_capital)
+            if not ledger.empty:
+                st.subheader("交易台账（每次决策视为等权全换仓）")
+                shown = ledger.copy()
+                for coln in ("数量", "价格", "金额", "实现盈亏"):
+                    shown[coln] = shown[coln].map(lambda v: f"{v:,.2f}")
+                st.dataframe(shown, width="stretch")
+                st.download_button("下载交易台账 CSV", ledger.to_csv(index=False).encode("utf-8-sig"),
+                                   file_name="trade_ledger.csv", mime="text/csv")
+
         csv_data = equity.to_csv().encode("utf-8-sig")
         st.download_button("下载账户净值 CSV", data=csv_data,
                            file_name="account_equity.csv", mime="text/csv")
 
 with tab_realtime:
+    st.subheader("大盘速览")
+    try:
+        idx_df = index_snapshot()
+        if idx_df.empty:
+            st.warning("未获取到指数行情（可能非交易时段或接口限流）。")
+        else:
+            icols = st.columns(len(idx_df))
+            for icol, (_, row) in zip(icols, idx_df.iterrows()):
+                icol.metric(row["名称"], f"{row['现价']:,.2f}", f"{row['涨跌幅']:+.2%}")
+    except Exception as e:  # noqa: BLE001
+        st.warning(f"指数行情获取失败：{e}")
+    st.divider()
     st.subheader("实时行情（准实时快照，秒级延迟）")
     st.caption("免费行情源为快照级（延迟数秒），非交易所级 tick 数据；"
                "仅供盘中观察与持仓跟踪，不改变月度调仓决策逻辑。")
@@ -511,6 +706,28 @@ with tab_log:
 with tab_data:
     st.subheader("数据状态")
     if data_dir.exists():
+        stats_path = data_dir / "update_stats.json"
+        if stats_path.exists():
+            stats = load_json(stats_path)
+            st.subheader("最近一次每日更新")
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("运行时间", str(stats.get("last_run", "-")))
+            s2.metric("数据源", str(stats.get("source", "-")))
+            s3.metric("更新股票", f"{stats.get('updated', 0)} 只")
+            s4.metric("总耗时", f"{stats.get('total_sec', '-')} 秒")
+            st.caption(
+                f"阶段耗时：数据拉取 {stats.get('phase1_sec', '-')}s / "
+                f"面板构建 {stats.get('phase2_sec', '-')}s / "
+                f"报告+决策 {stats.get('phase3_sec', '-')}s"
+                + (f"（其中报告 {stats.get('report_sec')}s、决策 {stats.get('decision_sec')}s）"
+                   if stats.get("decision_sec") is not None else ""))
+            st.divider()
+        try:
+            from ashare_quant.fetchers import list_sources
+            st.write("可用数据源：" + "、".join(list_sources()))
+        except Exception:  # noqa: BLE001
+            pass
+        st.divider()
         parquet = list(data_dir.glob("*.parquet"))
         manifest2 = load_json(data_dir / "manifest.json")
         st.write(f"股票/指数缓存文件数：{len(parquet)}")

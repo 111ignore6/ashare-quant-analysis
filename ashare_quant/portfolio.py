@@ -112,6 +112,88 @@ def equity_curve(close: pd.DataFrame, history: list[dict],
     return r
 
 
+def monthly_returns_table(returns: pd.Series) -> pd.DataFrame:
+    """年 × 月复合收益表（索引=年份，列=1..12，值为当月复合收益）。"""
+    r = returns.dropna()
+    if r.empty:
+        return pd.DataFrame()
+    idx = pd.to_datetime(r.index)
+    t = pd.DataFrame({"y": idx.year, "m": idx.month, "r": r.to_numpy()})
+    piv = t.pivot_table(index="y", columns="m", values="r",
+                        aggfunc=lambda s: float((1 + s).prod() - 1))
+    piv = piv.reindex(columns=range(1, 13))
+    return piv
+
+
+def recompute_account(history: list[dict], close: pd.DataFrame,
+                      capital: float = 100000.0) -> tuple[pd.Series, dict]:
+    """按给定初始资金重算净值曲线与绩效指标（不写文件，仪表盘预览用）。"""
+    returns = equity_curve(close, history, capital=capital)
+    if returns.empty:
+        return pd.Series(dtype=float), {}
+    equity = (1 + returns.fillna(0)).cumprod() * capital
+    metrics = metrics_from_returns(returns, periods_per_year=252)
+    return equity, metrics
+
+
+def build_trade_ledger(history: list[dict], close: pd.DataFrame,
+                       capital: float = 100000.0) -> pd.DataFrame:
+    """由决策历史推导交易台账（每次决策视为等权全换仓）。
+
+    上一期持仓全部按当期收盘卖出（计入已实现盈亏），当期选股全部按当期
+    收盘买入；与 equity_curve 的逐段收益模型口径一致。
+    """
+    rows: list[dict] = []
+    prev: dict[str, dict] = {}  # symbol -> {"shares": float, "cost": float}
+    for dec in history:
+        d0 = pd.Timestamp(dec["date"])
+        if d0 not in close.index:
+            continue
+        picks = dec.get("picks") or []
+        cap = float(dec.get("capital") or dec.get("initial_capital") or capital)
+        # 卖出上一期全部持仓
+        for sym, pos in prev.items():
+            if sym not in close.columns or pd.isna(close.loc[d0, sym]):
+                continue
+            price = float(close.loc[d0, sym])
+            rows.append({
+                "决策日": str(d0.date()), "代码": sym, "动作": "卖出",
+                "数量": round(pos["shares"], 2), "价格": round(price, 3),
+                "金额": round(pos["shares"] * price, 2),
+                "实现盈亏": round(pos["shares"] * (price - pos["cost"]), 2),
+            })
+        if not picks:
+            prev = {}
+            continue
+        syms = [p["symbol"] for p in picks]
+        weights = np.asarray([float(p.get("weight", 0)) for p in picks], dtype=float)
+        base = close.loc[d0, syms].astype(float)
+        valid = base.notna().to_numpy() & (base.to_numpy() > 0)
+        weights = weights * valid
+        total = weights.sum()
+        if total <= 0:
+            prev = {}
+            continue
+        weights = weights / total
+        current: dict[str, dict] = {}
+        for i, sym in enumerate(syms):
+            if not valid[i]:
+                continue
+            notional = cap * float(weights[i])
+            price = float(base[sym])
+            current[sym] = {"shares": notional / price, "cost": price}
+            rows.append({
+                "决策日": str(d0.date()), "代码": sym, "动作": "买入",
+                "数量": round(current[sym]["shares"], 2),
+                "价格": round(price, 3),
+                "金额": round(notional, 2),
+                "实现盈亏": 0.0,
+            })
+        prev = current
+    cols = ["决策日", "代码", "动作", "数量", "价格", "金额", "实现盈亏"]
+    return pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
+
+
 def update_portfolio(close: pd.DataFrame, cfg, portfolio_dir: Path,
                      decision: dict | None = None,
                      X: pd.DataFrame | None = None,

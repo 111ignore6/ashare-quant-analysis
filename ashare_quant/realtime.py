@@ -8,6 +8,13 @@ from __future__ import annotations
 
 import pandas as pd
 
+INDEX_CODES = {
+    "sh000001": "上证指数",
+    "sz399001": "深证成指",
+    "sz399006": "创业板指",
+    "sh000300": "沪深300",
+}
+
 
 def snapshot(symbols, source: str = "tencent") -> pd.DataFrame:
     """拉取一批股票的快照行情，返回标准表格。
@@ -37,3 +44,24 @@ def snapshot(symbols, source: str = "tencent") -> pd.DataFrame:
             "成交量(手)": q.get("volume"),
         })
     return pd.DataFrame(rows)
+
+
+def index_snapshot(source: str = "tencent") -> pd.DataFrame:
+    """四大指数实时快照（上证/深成/创业板/沪深300）。"""
+    import easyquotation
+
+    eq = easyquotation.use(source)
+    raw = eq.stocks(list(INDEX_CODES)) or {}
+    rows = []
+    for code, q in raw.items():
+        now = q.get("now")
+        prev_close = q.get("close")
+        if now is None or prev_close in (None, 0):
+            continue
+        rows.append({
+            "代码": code,
+            "名称": q.get("name") or INDEX_CODES.get(code, code),
+            "现价": float(now),
+            "涨跌幅": (float(now) - float(prev_close)) / float(prev_close),
+        })
+    return pd.DataFrame(rows, columns=["代码", "名称", "现价", "涨跌幅"])

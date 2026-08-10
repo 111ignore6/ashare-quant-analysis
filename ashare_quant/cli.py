@@ -201,6 +201,9 @@ def _simulation_full_returns(close: pd.DataFrame, index_close: pd.Series,
 
 
 def cmd_daily(args) -> None:
+    import json
+    import time
+
     from .daily import update_daily
     from .pipeline import build_panels
     from .universe import load_universe_cached
@@ -213,8 +216,34 @@ def cmd_daily(args) -> None:
     codes = load_universe_cached(
         cfg.universe_mode, cache_path=cfg.data_root / "universe.json",
         extra=local_symbols)
+
+    def _write_stats(t0: float, t1: float | None, t2: float | None,
+                     t3: float | None, extra: dict | None = None) -> None:
+        stats = {
+            "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "source": cfg.data_source,
+            "index_date": out.get("new_index_date"),
+            "updated": len(out.get("updated", [])),
+            "up_to_date": (len(out["up_to_date"]) if isinstance(out.get("up_to_date"), list)
+                           else out.get("up_to_date", 0)),
+            "failed": len(out.get("failed", [])),
+            "no_data": len(out.get("no_data", [])),
+            "phase1_sec": round(t1 - t0, 1) if t1 is not None else None,
+            "phase2_sec": round(t2 - t1, 1) if t1 is not None and t2 is not None else None,
+            "phase3_sec": round(t3 - t2, 1) if t2 is not None and t3 is not None else None,
+            "total_sec": round((t3 or t1 or t0) - t0, 1),
+            **(extra or {}),
+        }
+        try:
+            (cfg.data_root / "update_stats.json").write_text(
+                json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    t0 = time.time()
     print("阶段 1/3：增量更新行情数据（有进度条，首次/大涨后约 1-5 分钟）…", flush=True)
     out = update_daily(codes, store, cfg)
+    t1 = time.time()
     n_up = len(out["up_to_date"]) if isinstance(out["up_to_date"], list) else "all"
     print(f"指数截止={out['new_index_date']} 更新={len(out['updated'])} "
           f"已最新={n_up} 失败={len(out['failed'])}", flush=True)
@@ -230,10 +259,13 @@ def cmd_daily(args) -> None:
               f"如 {','.join(out['no_data'][:5])}…，已跳过今日", flush=True)
     if not out.get("new_data", True) and not args.force:
         print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）", flush=True)
+        _write_stats(t0, t1, None, None)
         return
     panels = build_panels(store)
+    t2 = time.time()
     print("阶段 2/3：生成报告与模拟盘（约 20 秒）…", flush=True)
     _build_html_report(cfg, store, args.out_dir, panels=panels)
+    t3 = time.time()
     if not args.no_decision:
         print("阶段 3/3：训练/加载模型并生成今日决策…", flush=True)
         payload, account = _save_decision(cfg, store, args.model_dir, args.sample_size,
@@ -243,7 +275,11 @@ def cmd_daily(args) -> None:
             cfg, out, payload, account, store.read_manifest(),
             Path(args.out_dir) / "daily_report.md")
         print(f"每日决策日报已生成: {report_path}", flush=True)
+    t4 = time.time()
     print(f"当日报告已生成: {args.out_dir}/report.html")
+    _write_stats(t0, t1, t2, t4,
+                 extra={"report_sec": round(t3 - t2, 1),
+                        "decision_sec": round(t4 - t3, 1) if not args.no_decision else None})
 
 
 def cmd_report(args) -> None:
