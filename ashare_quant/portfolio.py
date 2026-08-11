@@ -139,6 +139,28 @@ def recompute_account(history: list[dict], close: pd.DataFrame,
     return equity, metrics
 
 
+def account_basis(history: list[dict], close: pd.DataFrame, date,
+                  capital: float = 100000.0) -> float:
+    """决策日时的累计净资产（自首个正式决策日跟踪的净值曲线取值）。
+
+    实时估值若始终按「初始资金」作基准，会在每个决策日重置回初始值——
+    例如 08-11 收盘刚生成决策时，本期收益恒为 0、总资产显示 10 万，
+    与账户页累计净值（98,599）对不上。改用决策日累计净资产作基准后，
+    实时总资产=决策日资产 × 现价/成本，收盘后即与账户页一致。
+    """
+    live = [e for e in history if e.get("mode") == "live"] or history
+    equity, _ = recompute_account(live, close, capital)
+    if equity.empty:
+        return float(capital)
+    d0 = pd.Timestamp(date)
+    if d0 in equity.index:
+        return float(equity.loc[d0])
+    past = equity.index[equity.index <= d0]
+    if len(past):
+        return float(equity.loc[past[-1]])
+    return float(equity.iloc[0])
+
+
 def _prepend_start_point(history: list[dict], equity: pd.Series,
                          capital: float) -> pd.Series:
     """在净值曲线前补上首个决策日的建仓基准点（初始资金）。"""

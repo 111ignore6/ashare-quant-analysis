@@ -1,10 +1,10 @@
 
 import pandas as pd
 
-from ashare_quant.portfolio import (append_decision, build_trade_ledger,
-                                    equity_curve, load_history,
-                                    monthly_returns_table, recompute_account,
-                                    update_portfolio)
+from ashare_quant.portfolio import (account_basis, append_decision,
+                                    build_trade_ledger, equity_curve,
+                                    load_history, monthly_returns_table,
+                                    recompute_account, update_portfolio)
 
 
 def _close():
@@ -113,6 +113,23 @@ def test_recompute_account_uses_capital():
     assert equity.iloc[0] == 200000.0
     assert abs(equity.iloc[1] - 200000.0 * 1.045) < 1e-6
     assert metrics["annual_return"] != 0 or len(equity) == 1
+
+
+def test_account_basis_uses_cumulative_equity():
+    """决策日实时估值基准 = 当日累计净资产，而不是初始资金（避免重置回 10 万）。"""
+    close = _close()
+    history = _history()
+    equity, _ = recompute_account(history, close, 100000.0)
+    d6 = pd.Timestamp("2026-08-06")
+    assert d6 in equity.index
+    basis = account_basis(history, close, d6, 100000.0)
+    assert abs(basis - equity.loc[d6]) < 1e-6
+    assert basis != 100000.0  # 决策日基准应为累计净资产
+    # 无历史时回退初始资金
+    assert account_basis([], close, d6, 100000.0) == 100000.0
+    # 日期晚于曲线末端：取最后一个净值点
+    later = account_basis(history, close, "2026-08-10", 100000.0)
+    assert abs(later - equity.iloc[-1]) < 1e-6
 
 
 def test_build_trade_ledger_full_turnover():

@@ -22,8 +22,9 @@ from streamlit_autorefresh import st_autorefresh
 
 from ashare_quant.account import account_snapshot
 from ashare_quant.config import update_config_yaml
-from ashare_quant.portfolio import (build_trade_ledger, load_history,
-                                    monthly_returns_table, recompute_account)
+from ashare_quant.portfolio import (account_basis, build_trade_ledger,
+                                    load_history, monthly_returns_table,
+                                    recompute_account)
 from ashare_quant.realtime import index_snapshot, snapshot
 
 PROJECT = Path(__file__).parent
@@ -195,32 +196,41 @@ def render_realtime_valuation(decision: dict, data_dir: Path, key: str,
     if not st.toggle("盘中实时估值（快照价，秒级）", value=False, key=key):
         return
     try:
+        initial = float(capital) if capital is not None \
+            else float(decision.get("initial_capital", 100000.0))
         pick_syms = [p["symbol"] for p in decision["picks"]]
         snap = _cached_snapshot(tuple(pick_syms))
         if snap.empty:
             st.warning("未获取到实时行情（可能非交易时段或接口限流）。")
             return
         close_panel = load_panel_close(data_dir)
+        # 以决策日累计净资产为基准：否则每个决策日实时总资产会重置回初始值，
+        # 与账户页累计净值（98,599 而非 100,000）对不上
+        history_path = data_dir / "portfolio" / "account_history.jsonl"
+        hist_all = load_history(history_path) if history_path.exists() else []
+        hist_live = [e for e in hist_all if e.get("mode") == "live"] or hist_all
+        basis = account_basis(hist_live, close_panel, decision["date"], initial) \
+            if close_panel is not None else initial
         d0 = pd.Timestamp(decision["date"])
         prices = snap.set_index("代码")["现价"].astype(float)
         fallback = close_panel.iloc[-1].reindex(pick_syms)
         if close_panel is not None and d0 in close_panel.index:
             fallback = fallback.fillna(close_panel.loc[d0, pick_syms])
         prices = prices.reindex(fallback.index).fillna(fallback)
-        dec_view = {**decision, "initial_capital": float(capital)} \
-            if capital is not None else decision
+        dec_view = {**decision, "initial_capital": basis}
         acc = account_snapshot(dec_view, close_panel, prices=prices)
         if acc is None:
             st.warning("无法按实时价估值（缺少决策日基准）。")
             return
         r1, r2, r3, r4 = st.columns(4)
         r1.metric("实时总资产", f"{acc['total_asset']:,.0f} 元")
-        r2.metric("实时总收益", f"{acc['total_return']:+.2%}")
-        r3.metric("实时浮动盈亏", f"{acc['total_pnl']:+,.0f} 元")
+        r2.metric("实时总收益（累计）", f"{acc['total_asset'] / initial - 1:+.2%}")
+        r3.metric("本期浮动盈亏", f"{acc['total_pnl']:+,.0f} 元")
         r4.metric("现金余额", f"{acc['cash']:,.0f} 元")
-        st.caption(f"本期持仓估值：按决策日 {decision['date']} 收盘成本 × 快照现价逐只计算，"
-                   "显示的是本期持仓（决策日至今）的收益率；缺失行情用本地最新收盘价兜底。"
-                   "「账户」页是自首个决策日以来的累计口径，两者数值不同（收盘后实时价=收盘价）。")
+        st.caption(f"基准：决策日 {decision['date']} 累计净资产 {basis:,.0f} 元"
+                   "（自首个决策日跟踪）× 快照现价逐只估值；实时总收益=总资产/初始资金-1，"
+                   "与「账户」页累计口径一致。缺失行情用本地最新收盘价兜底，"
+                   "收盘后现价=收盘价、本期浮动盈亏为 0。")
     except Exception as e:  # noqa: BLE001
         st.error(f"实时估值获取失败：{e}")
 
@@ -408,14 +418,16 @@ with tab_overview:
     c4.metric("今日持仓", f"{len(decision['picks'])} 只" if decision else "—")
 
     close_panel = load_panel_close(data_dir)
-    dec_view = {**decision, "initial_capital": float(capital)} \
-        if decision is not None else None
-    account = account_snapshot(dec_view, close_panel) \
-        if dec_view and close_panel is not None else None
     # 累计口径（与「账户」页一致）：自首个正式决策日跟踪的净值曲线
     history_path = data_dir / "portfolio" / "account_history.jsonl"
     hist_all = load_history(history_path) if history_path.exists() else []
     hist_live = [e for e in hist_all if e.get("mode") == "live"] or hist_all
+    # 持仓明细/本期口径同样以决策日累计净资产为基准（避免重置回 10 万）
+    basis = account_basis(hist_live, close_panel, decision["date"], float(capital)) \
+        if decision is not None and close_panel is not None else float(capital)
+    dec_view = {**decision, "initial_capital": basis} if decision is not None else None
+    account = account_snapshot(dec_view, close_panel) \
+        if dec_view and close_panel is not None else None
     equity_cum, _ = recompute_account(hist_live, close_panel, float(capital)) \
         if hist_live and close_panel is not None else (pd.Series(dtype=float), {})
     if account or not equity_cum.empty:
@@ -438,7 +450,8 @@ with tab_overview:
             a3.metric("本期收益率", f"{account['total_return']:+.2%}")
             a4.metric("本期浮动盈亏", f"{account['total_pnl']:+,.0f} 元")
         if account:
-            st.caption(f"本期口径：决策日 {decision['date']} 收盘建仓，自决策日收益 "
+            st.caption(f"本期口径：决策日 {decision['date']} 收盘建仓"
+                       f"（基准 {basis:,.0f} 元 = 当日累计净资产），自决策日收益 "
                        f"{account['total_return']:+.2%}（刚决策当日为 0，次日开始体现）。")
         render_realtime_valuation(decision, data_dir, key="overview_rt",
                                   capital=float(capital))
@@ -550,8 +563,9 @@ with tab_decision:
             pos["盈亏率"] = pos["盈亏率"].map(lambda v: f"{v:+.2%}")
             st.dataframe(pos, width="stretch")
         with st.expander("模型预测明细（为什么选这些股票）"):
-            st.caption("每只股票在 LGBM / 梯度提升 / SVM 三个模型下的未来 20 日预期收益，"
-                       "最终得分为三模型均值经置信度加权。")
+            st.caption("每只股票在 LGBM / 梯度提升 / 随机森林 / SVM / KNN / "
+                       "线性回归六个模型下的未来 20 日预期收益，"
+                       "最终得分为多模型均值经置信度加权。")
             detail = pd.DataFrame(decision["picks"]).copy()
             if "model_scores" in detail.columns and detail["model_scores"].notna().any():
                 scores = pd.json_normalize(detail["model_scores"].dropna().tolist())
@@ -792,9 +806,14 @@ with tab_realtime:
                     fallback = close_panel.iloc[-1].reindex(pick_syms)
                     fallback = fallback.fillna(close_panel.loc[d0, pick_syms])
                     prices = prices.reindex(fallback.index).fillna(fallback)
+                    history_path = data_dir / "portfolio" / "account_history.jsonl"
+                    hist_all = load_history(history_path) if history_path.exists() else []
+                    hist_live = [e for e in hist_all if e.get("mode") == "live"] or hist_all
+                    basis = account_basis(hist_live, close_panel,
+                                          decision["date"], float(capital))
                     try:
                         acc_realtime = account_snapshot(
-                            {**decision, "initial_capital": float(capital)},
+                            {**decision, "initial_capital": basis},
                             close_panel, prices=prices)
                     except Exception:  # noqa: BLE001
                         acc_realtime = None
@@ -802,13 +821,15 @@ with tab_realtime:
                         st.subheader("实时账户估值（按快照现价）")
                         r1, r2, r3, r4 = st.columns(4)
                         r1.metric("实时总资产", f"{acc_realtime['total_asset']:,.0f} 元")
-                        r2.metric("实时总收益", f"{acc_realtime['total_return']:+.2%}")
-                        r3.metric("实时浮动盈亏", f"{acc_realtime['total_pnl']:+,.0f} 元")
+                        r2.metric("实时总收益（累计）",
+                                  f"{acc_realtime['total_asset'] / float(capital) - 1:+.2%}")
+                        r3.metric("本期浮动盈亏", f"{acc_realtime['total_pnl']:+,.0f} 元")
                         r4.metric("现金余额", f"{acc_realtime['cash']:,.0f} 元")
-                        st.caption(f"本期持仓估值：按决策日 {decision['date']} 收盘成本 × "
-                                   "实时现价逐只计算（自决策日收益）；停牌/未取到行情"
-                                   "的股票用本地最新收盘价兜底。「账户」页是自首个决策日"
-                                   "以来的累计口径，两者数值不同。")
+                        st.caption(f"基准：决策日 {decision['date']} 累计净资产 "
+                                   f"{basis:,.0f} 元（自首个决策日跟踪）× 快照现价；"
+                                   "实时总收益=总资产/初始资金-1（累计口径，与账户页一致）。"
+                                   "「自决策日涨跌」为现价相对决策日收盘的变化，"
+                                   "「本期浮动盈亏」为现价相对决策日成本。")
                         # 每只股票实时收益列（数值版，先于下方格式化）
                         rows_r = acc_realtime["rows"].rename(columns={
                             "现价": "实时价", "市值": "持仓市值",
