@@ -24,10 +24,16 @@ Write-Output "== 3/4 训练模型并生成今日模拟持仓 =="
 python -X utf8 -u -m ashare_quant.cli decision --data-root $DataRoot --model-dir $ModelDir --out $OutDir
 
 Write-Output "== 4/4 启动仪表盘（后台运行，不阻塞本窗口）=="
-Start-Process python -ArgumentList @(
-    "-m", "streamlit", "run", "dashboard.py",
-    "--server.port", "8501", "--server.headless", "false"
-) -WorkingDirectory $ProjectRoot -WindowStyle Hidden
-Start-Sleep -Seconds 3
-Write-Output "仪表盘已启动：http://localhost:8501（如未自动打开请手动访问）"
+$existing = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($existing) {
+    Write-Output "仪表盘已在运行：http://localhost:8501（跳过启动）"
+} else {
+    Start-Process python -ArgumentList @(
+        "-m", "streamlit", "run", "dashboard.py",
+        "--server.port", "8501", "--server.headless", "false"
+    ) -WorkingDirectory $ProjectRoot -WindowStyle Hidden
+    Start-Sleep -Seconds 3
+    Write-Output "仪表盘已启动：http://localhost:8501（如未自动打开请手动访问）"
+}
 Write-Output "一条龙完成。"

@@ -65,6 +65,12 @@ function Start-Fetch {
 }
 
 function Start-Dashboard {
+    $existing = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($existing) {
+        Write-Host "仪表盘已在运行：http://localhost:8501（无需重复启动）" -ForegroundColor Green
+        return
+    }
     Invoke-Step "启动仪表盘（http://localhost:8501，Ctrl+C 停止）" {
         Invoke-Python @("-m", "streamlit", "run", "dashboard.py", "--server.port", "8501")
     }
