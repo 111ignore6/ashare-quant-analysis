@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from ashare_quant.fetchers.mootdx_fetcher import _qfq_adjust, _to_tdx_code
+from ashare_quant.fetchers.mootdx_fetcher import _bj_bars, _qfq_adjust, _to_tdx_code
 
 
 def test_to_tdx_code():
@@ -45,3 +45,27 @@ def test_qfq_adjust_empty_xdxr():
     }, index=idx)
     out = _qfq_adjust(bars, pd.DataFrame())
     assert np.allclose(out["close"], [9.16, 9.31])
+
+
+def test_bj_bars_uses_market_2():
+    """北交所 920 走市场号 2（mootdx 默认判断会把 920 误判为沪市）。"""
+    raw = [{
+        "open": 10.0, "close": 10.2, "high": 10.3, "low": 9.9,
+        "vol": 1000, "amount": 1e6, "datetime": "2026-08-11 15:00:00",
+    }]
+
+    class _Client:
+        class _Inner:
+            @staticmethod
+            def get_security_bars(freq, market, code, start, offset):
+                assert market == 2
+                assert code == "920000"
+                return raw
+
+        client = _Inner()
+
+    df = _bj_bars(_Client(), "920000")
+    assert list(df.columns) == ["open", "high", "low", "close", "volume", "amount"]
+    assert df.index.name == "date"
+    assert df.iloc[0]["volume"] == 1000
+    assert df.iloc[0]["close"] == 10.2

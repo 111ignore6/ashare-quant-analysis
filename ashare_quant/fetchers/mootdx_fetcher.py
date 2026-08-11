@@ -30,6 +30,20 @@ def _to_tdx_code(symbol: str) -> str:
     return s
 
 
+def _bj_bars(client, code: str) -> pd.DataFrame:
+    """北交所日线：通达信市场号 2（mootdx 的 get_stock_market 把 920 新码
+    误判为沪市导致返回空，这里直接指定市场）。"""
+    raw = client.client.get_security_bars(9, 2, code, 0, 800)
+    if not raw:
+        return pd.DataFrame(columns=_COLS)
+    df = pd.DataFrame(raw)
+    df = df.rename(columns={"vol": "volume"})
+    df["datetime"] = pd.to_datetime(df["datetime"])
+    df = df.set_index("datetime")[["open", "high", "low", "close", "volume", "amount"]]
+    df.index.name = "date"
+    return df
+
+
 def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
     """用除权除息信息做前复权（最新价=原价，历史价格按比例缩放）。
 
@@ -77,11 +91,19 @@ def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
 def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
     """返回 date 索引、open/high/low/close/volume/amount 的标准面板。"""
     client = _get_client()
-    bars = client.bars(symbol=_to_tdx_code(symbol), frequency=9, offset=800)
-    if bars is None or bars.empty:
+    code = _to_tdx_code(symbol)
+    if code.startswith("920"):
+        # 北交所新代码段（mootdx 0.8.7+ 支持，须用 MARKET_BJ=2；
+        # 旧 43/83/87 号段已迁移作废，不处理）
+        bars = _bj_bars(client, code)
+    else:
+        bars = client.bars(symbol=code, frequency=9, offset=800)
+        if bars is None or bars.empty:
+            return pd.DataFrame(columns=_COLS)
+        bars = bars[["open", "high", "low", "close", "vol", "amount"]].copy()
+        bars = bars.rename(columns={"vol": "volume"})
+    if bars.empty:
         return pd.DataFrame(columns=_COLS)
-    bars = bars[["open", "high", "low", "close", "vol", "amount"]].copy()
-    bars = bars.rename(columns={"vol": "volume"})
     bars.index = pd.to_datetime(bars.index).normalize()
     bars = bars[~bars.index.duplicated(keep="last")].sort_index()
     # 按日期区间过滤
@@ -91,7 +113,10 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
     if adjust == "qfq":
         xdxr = _XDXR_CACHE.get(symbol)
         if xdxr is None:
-            xdxr = client.xdxr(symbol=_to_tdx_code(symbol))
+            try:
+                xdxr = client.xdxr(symbol=code)
+            except Exception:  # noqa: BLE001（北交所/复权信息缺失时按原价返回）
+                xdxr = pd.DataFrame()
             _XDXR_CACHE[symbol] = xdxr
         bars = _qfq_adjust(bars, xdxr)
     return bars
