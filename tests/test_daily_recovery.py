@@ -7,6 +7,7 @@ import pandas as pd
 from ashare_quant.cache import ParquetStore
 from ashare_quant.config import Config
 from ashare_quant.daily import update_daily
+from ashare_quant.fetchers.registry import resolve_fallback_fetchers
 
 
 def _df(dates, close):
@@ -89,14 +90,16 @@ def test_update_daily_cooldown_skips_recent_failures(tmp_path):
         raise ConnectionError("timeout")
 
     cfg = Config.from_dict({"years": 1, "retry": 1, "max_workers": 2})
-    out = update_daily(codes, store, cfg, index_fetcher=fake_index, fetcher=failing_fetcher)
+    out = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                       fetcher=failing_fetcher, fallback_fetcher=[])
     assert sorted(out["failed"]) == codes
     failed = json.loads((tmp_path / "update_failed.json").read_text(encoding="utf-8"))
     assert set(failed) == set(codes)
 
     # 第二次（同一天）：冷却命中，不再调用 fetcher
     calls.clear()
-    out2 = update_daily(codes, store, cfg, index_fetcher=fake_index, fetcher=failing_fetcher)
+    out2 = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                        fetcher=failing_fetcher, fallback_fetcher=[])
     assert out2["new_data"] is False
     assert out2.get("cooldown_skipped") is True
     assert out2["up_to_date"] == "all"
@@ -125,6 +128,42 @@ def test_update_daily_fallback_on_empty_response(tmp_path, monkeypatch):
                        fetcher=empty_fetcher, fallback_fetcher=good_fetcher)
     assert len(out["updated"]) == 2
     assert calls["primary"] == 2 and calls["fallback"] == 2
+    assert len(store.load(codes[0])) == 3
+
+
+def test_resolve_fallback_fetchers_multi_level():
+    cfg = Config.from_dict({"data_source": "mootdx",
+                            "fallback_sources": ["tencent", "akshare"]})
+    fbs = resolve_fallback_fetchers(cfg)
+    assert len(fbs) == 2  # tencent + akshare（不含主源）
+
+
+def test_update_daily_multi_level_fallback(tmp_path, monkeypatch):
+    """多级备源：主源空 → 第一备源空 → 第二备源有 → updated。"""
+    monkeypatch.setattr("ashare_quant.daily.market_session", lambda: "post")
+    store, codes = _setup(tmp_path, n_stocks=2, index_end="2024-01-04")
+    calls = {"p": 0, "f1": 0, "f2": 0}
+
+    def fake_index(symbol):
+        return _df(["2024-01-02", "2024-01-03", "2024-01-04"], [3000, 3010, 3020])
+
+    def empty1(code, start, end, adjust):
+        calls["p"] += 1
+        return _df([], [])
+
+    def empty2(code, start, end, adjust):
+        calls["f1"] += 1
+        return _df([], [])
+
+    def good3(code, start, end, adjust):
+        calls["f2"] += 1
+        return _df(["2024-01-04"], [11.0])
+
+    cfg = Config.from_dict({"years": 1, "retry": 1, "max_workers": 2})
+    out = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                       fetcher=empty1, fallback_fetcher=[empty2, good3])
+    assert len(out["updated"]) == 2
+    assert calls == {"p": 2, "f1": 2, "f2": 2}
     assert len(store.load(codes[0])) == 3
 
 
@@ -272,6 +311,7 @@ def test_update_daily_retries_then_fails(tmp_path):
         raise ConnectionError("timeout")
 
     cfg = Config.from_dict({"years": 1, "retry": 3, "max_workers": 1})
-    out = update_daily(codes, store, cfg, index_fetcher=fake_index, fetcher=failing_fetcher)
+    out = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                       fetcher=failing_fetcher, fallback_fetcher=[])
     assert out["failed"] == codes
     assert len(calls) == 3  # 重试次数与配置一致

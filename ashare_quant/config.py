@@ -12,6 +12,7 @@ class Config:
     universe_mode: str = "csi300"
     data_source: str = "tencent"
     fallback_source: str = "akshare"
+    fallback_sources: tuple[str, ...] = ("tencent", "akshare")
     years: int = 3
     adjust: str = "qfq"
     max_workers: int = 8
@@ -30,6 +31,8 @@ class Config:
         kwargs = {k: v for k, v in d.items() if k in names}
         if "data_root" in kwargs:
             kwargs["data_root"] = Path(kwargs["data_root"])
+        if "fallback_sources" in kwargs and isinstance(kwargs["fallback_sources"], (list, tuple)):
+            kwargs["fallback_sources"] = tuple(str(x) for x in kwargs["fallback_sources"])
         return cls(**kwargs)
 
     def to_dict(self) -> dict:
@@ -61,6 +64,9 @@ def _coerce(field_name: str, value):
         return int(value)
     if t is str:
         return str(value)
+    if getattr(t, "__origin__", None) is tuple:
+        if isinstance(value, (list, tuple)):
+            return tuple(str(x) for x in value)
     return value
 
 

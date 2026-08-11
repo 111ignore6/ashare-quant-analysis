@@ -44,3 +44,20 @@ def resolve_fetchers(cfg) -> tuple[Callable, Callable | None, Callable | None]:
     return (primary.fetch_daily,
             getattr(primary, "fetch_index_daily", None),
             fallback)
+
+
+def resolve_fallback_fetchers(cfg) -> list[Callable]:
+    """按配置解析多级备源链（如 mootdx → tencent → akshare），去重、跳过未知源。"""
+    out: list[Callable] = []
+    names = list(getattr(cfg, "fallback_sources", ()) or ())
+    single = getattr(cfg, "fallback_source", None)
+    if single and single not in names:
+        names.append(single)
+    for name in names:
+        try:
+            f = get_source(name).fetch_daily
+        except KeyError:
+            continue
+        if f not in out:
+            out.append(f)
+    return out

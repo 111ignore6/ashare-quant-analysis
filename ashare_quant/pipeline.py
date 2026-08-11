@@ -11,11 +11,10 @@ from .cache import ParquetStore
 from .config import Config
 
 
-def _fetch_with_fallback(code: str, cfg: Config, fetcher, fallback=None) -> pd.DataFrame:
+def _fetch_with_fallback(code: str, cfg: Config, fetcher, fallbacks=None) -> pd.DataFrame:
     last_err: Exception | None = None
-    for f in (fetcher, fallback):
-        if f is None:
-            continue
+    chain = [fetcher] + (list(fallbacks) if fallbacks else [])
+    for f in chain:
         try:
             df = f(code, start_date_for(cfg), end_date_for(cfg), cfg.adjust)
             if not df.empty:
@@ -57,12 +56,15 @@ def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
                       fetcher=None, universe_name: str = "csi300",
                       progress_every: int = 100, fallback_fetcher=None) -> dict:
     if fetcher is None:
-        from .fetchers import resolve_fetchers
-        fetcher, _, fallback = resolve_fetchers(cfg)
-        if fallback_fetcher is not None:
-            fallback = fallback_fetcher
+        from .fetchers import resolve_fetchers, resolve_fallback_fetchers
+        fetcher, _, _ = resolve_fetchers(cfg)
+        fallback = resolve_fallback_fetchers(cfg)
     else:
         fallback = fallback_fetcher
+    if fallback_fetcher is not None:
+        fallback = fallback_fetcher
+    if not isinstance(fallback, (list, tuple)):
+        fallback = [fallback] if fallback else []
     counts = {"ok": [], "failed": [], "skipped": [], "no_data": []}
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:

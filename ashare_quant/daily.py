@@ -58,12 +58,13 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                  index_symbol: str = "sh000300") -> dict:
     if index_fetcher is None:
         from .fetchers import resolve_fetchers
-        _, index_fetcher, fb = resolve_fetchers(cfg)
-        fallback_fetcher = fallback_fetcher or fb
+        _, index_fetcher, _ = resolve_fetchers(cfg)
     if fetcher is None:
         from .fetchers import resolve_fetchers
-        fetcher, _, fb = resolve_fetchers(cfg)
-        fallback_fetcher = fallback_fetcher or fb
+        fetcher, _, _ = resolve_fetchers(cfg)
+    if fallback_fetcher is None:
+        from .fetchers import resolve_fallback_fetchers
+        fallback_fetcher = resolve_fallback_fetchers(cfg)
     manifest = store.read_manifest()
     prev_index_end = manifest.get(index_symbol, {}).get("end")
     idx_start = (pd.Timestamp(prev_index_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d") \
@@ -119,7 +120,9 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 return "updated"
             return "no_data"
 
-        sources = [fetcher] + ([fallback_fetcher] if fallback_fetcher else [])
+        fallbacks = list(fallback_fetcher) if isinstance(fallback_fetcher, (list, tuple)) \
+            else ([fallback_fetcher] if fallback_fetcher else [])
+        sources = [fetcher] + [f for f in fallbacks if f is not fetcher]
         intraday = market_session() in ("am", "lunch", "pm")
         final = "failed"
         for f in sources:

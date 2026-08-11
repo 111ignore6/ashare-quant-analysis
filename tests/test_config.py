@@ -14,6 +14,11 @@ def test_from_dict_overrides():
     assert cfg.universe_mode == "all"
 
 
+def test_from_dict_fallback_sources():
+    cfg = Config.from_dict({"fallback_sources": ["tencent", "akshare"]})
+    assert cfg.fallback_sources == ("tencent", "akshare")
+
+
 def test_to_dict_roundtrip(tmp_path):
     p = tmp_path / "cfg.yaml"
     p.write_text("initial_capital: 100000.0\ntop_n: 50\nstop_loss: -0.15\n",
