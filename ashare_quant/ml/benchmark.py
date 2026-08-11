@@ -14,7 +14,7 @@ from ..models.candidates import LowVolModel, MomentumModel, MultiFactorModel, Re
 from ..research.factor_stats import cross_sectional_ic, forward_returns
 from ..research.factors import compute_factors, winsorize_zscore
 from ..screening import walk_forward_folds
-from .evaluate import predict_scores, walk_forward_ml_evaluate
+from .evaluate import walk_forward_ml_evaluate
 from .features import build_dataset
 from .models import MODELS
 

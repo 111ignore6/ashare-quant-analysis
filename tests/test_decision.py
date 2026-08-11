@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from ashare_quant.ml.decision import decide, load_models, train_and_save
 from ashare_quant.ml.features import build_dataset
-from ashare_quant.ml.models import linear
 
 
 def _market():

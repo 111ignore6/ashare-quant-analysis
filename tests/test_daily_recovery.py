@@ -1,7 +1,6 @@
 """关键回归测试：数据恢复、失败冷却、超时守卫、缓存文件过滤。"""
 
 import json
-import time
 
 import pandas as pd
 

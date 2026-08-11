@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 
 from ashare_quant.fetchers.tencent_fetcher import _kline, _parse_kline, to_tx_code

@@ -1,4 +1,3 @@
-import pandas as pd
 
 from ashare_quant.realtime import INDEX_CODES, index_snapshot, snapshot
 

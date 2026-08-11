@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from ashare_quant.ml.evaluate import walk_forward_ml_evaluate
 from ashare_quant.ml.features import build_dataset
-from ashare_quant.ml.models import linear, lgbm
+from ashare_quant.ml.models import linear
 from ashare_quant.screening import walk_forward_folds
 
 

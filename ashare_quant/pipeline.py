@@ -74,11 +74,12 @@ def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
                 print(f"progress {done}/{len(codes)}", flush=True)
             status = fut.result()
             counts.setdefault(status, []).append(futures[fut])
-    store.rebuild_manifest()
+    manifest = store.rebuild_manifest()
     result = {"universe": universe_name, **counts}
     for key in ("ok", "failed", "skipped", "no_data"):
         result[key] = sorted(result[key])
-    result["rows"] = sum(len(store.load(c)) for c in codes if store.exists(c))
+    # 用 manifest 的行数统计，避免下载后重读全部缓存文件
+    result["rows"] = sum(m.get("rows", 0) for c, m in manifest.items() if c in codes)
     return result
 
 

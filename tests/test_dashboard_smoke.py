@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 PROJ = Path(__file__).resolve().parents[1]
 

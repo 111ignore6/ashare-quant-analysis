@@ -112,7 +112,8 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 if end_ts >= last:
                     return "up_to_date"
                 start = (end_ts + pd.Timedelta(days=1)).strftime("%Y%m%d")
-            df = f(code, start, str(last).replace("-", ""), cfg.adjust)
+            # end 用干净日期串（str(Timestamp) 会带 " 00:00:00" 时间部分，部分源容错差）
+            df = f(code, start, last.strftime("%Y%m%d"), cfg.adjust)
             if not df.empty:
                 store.append(code, df)
                 return "updated"

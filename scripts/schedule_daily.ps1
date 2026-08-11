@@ -1,14 +1,20 @@
 ﻿param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$DataRoot = "$ProjectRoot\data\tencent",
-    [string]$OutDir = "$ProjectRoot\docs\simulation"
+    [string]$OutDir = "$ProjectRoot\docs\simulation-all",
+    [switch]$Force
 )
 
 $taskName = "AshareQuantDaily"
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existing) {
-    Write-Output "计划任务 $taskName 已存在，跳过。"
-    exit 0
+    if ($Force) {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        Write-Output "已移除旧任务 $taskName，重新注册（需要管理员权限）。"
+    } else {
+        Write-Output "计划任务 $taskName 已存在，跳过（如需更新用 -Force）。"
+        exit 0
+    }
 }
 $python = (Get-Command python).Source
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At 16:05

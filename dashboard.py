@@ -107,6 +107,22 @@ def load_json(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+@st.cache_data(ttl=60)
+def load_decision(sim_dir: Path) -> dict | None:
+    """读取最新决策：兼容多个输出目录（计划任务历史写 docs/simulation）。"""
+    candidates = [
+        sim_dir / "decision.json",
+        PROJECT / "docs" / "simulation" / "decision.json",
+        PROJECT / "docs" / "decision" / "decision.json",
+    ]
+    best = None
+    for p in candidates:
+        d = load_json(p)
+        if d and (best is None or str(d.get("date", "")) > str(best.get("date", ""))):
+            best = d
+    return best
+
+
 @st.cache_data(ttl=600)
 def load_panel_close(data_dir: Path):
     """读取面板缓存中的收盘价矩阵（date × symbol）。"""
@@ -248,7 +264,7 @@ def render_task(key: str, title: str) -> bool:
                 state["running"] = False
                 state["code"] = payload
     if state["running"]:
-        with st.status(f"{title} 进行中…", expanded=True) as status:
+        with st.status(f"{title} 进行中…", expanded=True):
             tail = state["lines"][-30:]
             st.code("\n".join(tail) if tail else "等待输出…（长任务请耐心等待）")
         # 任务运行中每 5 秒自动刷新页面，实时显示进度
@@ -327,7 +343,7 @@ with tab_overview:
     st.subheader("系统状态与快速操作")
     manifest = load_json(data_dir / "manifest.json") if data_dir.exists() else None
     model_meta = load_json(model_dir / "meta.json")
-    decision = load_json(sim_dir / "decision.json")
+    decision = load_decision(sim_dir)
     stocks = {k: v for k, v in (manifest or {}).items() if k != "sh000300"}
     idx_end = (manifest or {}).get("sh000300", {}).get("end")
     stale = [k for k, v in stocks.items()

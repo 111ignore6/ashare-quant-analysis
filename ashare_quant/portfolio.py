@@ -82,7 +82,9 @@ def equity_curve(close: pd.DataFrame, history: list[dict],
         if d0 not in close.index:
             continue
         d1 = pd.Timestamp(entries[i + 1]["date"]) if i + 1 < len(entries) else None
-        seg = dates[(dates > d0) & (dates < d1)] if d1 is not None else dates[dates > d0]
+        # 决策日 d0 收盘建仓，持有到下一决策日 d1 收盘（换仓前最后一刻），
+        # 因此段 i 覆盖 (d0, d1]：含 d1 当天的收益；新仓位从 d1 之后开始。
+        seg = dates[(dates > d0) & (dates <= d1)] if d1 is not None else dates[dates > d0]
         if len(seg) == 0:
             continue
         picks = dec.get("picks") or []

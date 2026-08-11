@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 from typing import Callable
 
-import numpy as np
 import pandas as pd
 
 from .ops import winsorize_zscore_np

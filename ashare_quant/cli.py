@@ -408,7 +408,6 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
 
 
 def cmd_decision(args) -> None:
-    from .pipeline import build_panels
 
     cfg = Config.from_yaml(Path(args.config))
     if args.data_root:

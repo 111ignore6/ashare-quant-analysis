@@ -1,4 +1,3 @@
-import json
 
 import pandas as pd
 
@@ -45,6 +44,25 @@ def test_equity_curve():
     assert abs(rets.loc["2026-08-04"] - 0.045) < 1e-9
     assert abs(rets.loc["2026-08-05"] - (11.0 / 10.5 - 1) * 0.5 - (5.0 / 5.2 - 1) * 0.5) < 1e-9
     assert abs(rets.loc["2026-08-07"] - (12.0 / 11.5 - 1)) < 1e-9
+    # 换仓日 08-06 当天收益归旧仓位（段1权重）：0.5*(11.5/11-1) + 0.5*(4.8/5-1)
+    expected_d6 = 0.5 * (11.5 / 11.0 - 1) + 0.5 * (4.8 / 5.0 - 1)
+    assert abs(rets.loc["2026-08-06"] - expected_d6) < 1e-9
+
+
+def test_equity_curve_consecutive_decisions():
+    """连续决策日：换仓日收益计入前一段，曲线不再空白。"""
+    idx = pd.to_datetime(["2026-08-10", "2026-08-11", "2026-08-12"])
+    close = pd.DataFrame({"600000": [10.0, 10.5, 11.0]}, index=idx)
+    hist = [
+        {"date": "2026-08-10", "capital": 100000.0,
+         "picks": [{"symbol": "600000", "weight": 1.0}]},
+        {"date": "2026-08-11", "capital": 100000.0,
+         "picks": [{"symbol": "600000", "weight": 1.0}]},
+    ]
+    rets = equity_curve(close, hist, capital=100000.0)
+    assert list(rets.index) == [pd.Timestamp("2026-08-11"), pd.Timestamp("2026-08-12")]
+    assert abs(rets.loc["2026-08-11"] - (10.5 / 10.0 - 1)) < 1e-9  # 08-10 决策的收益
+    assert abs(rets.loc["2026-08-12"] - (11.0 / 10.5 - 1)) < 1e-9  # 08-11 决策的收益
 
 
 def test_update_portfolio_end_to_end(tmp_path):

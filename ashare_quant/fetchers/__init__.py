@@ -1,4 +1,3 @@
-"""行情数据抓取器（AKShare 主、BaoStock 备）。"""
 """数据源包：内置 tencent / mootdx / akshare / baostock，可注册第三方源。"""
 
 from . import akshare_fetcher, baostock_fetcher, mootdx_fetcher, tencent_fetcher

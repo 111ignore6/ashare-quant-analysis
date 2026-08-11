@@ -1,4 +1,3 @@
-from pathlib import Path
 from ashare_quant.config import Config, update_config_yaml
 
 

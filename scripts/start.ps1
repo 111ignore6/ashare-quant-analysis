@@ -7,7 +7,7 @@
 Set-Location $ProjectRoot
 
 $DataRoot = Join-Path $ProjectRoot "data\tencent"
-$OutDir = Join-Path $ProjectRoot "docs\simulation"
+$OutDir = Join-Path $ProjectRoot "docs\simulation-all"
 $ModelDir = Join-Path $ProjectRoot "models\all"
 $Config = Join-Path $ProjectRoot "config.yaml"
 
