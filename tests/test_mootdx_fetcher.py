@@ -45,6 +45,25 @@ def test_qfq_adjust_empty_xdxr():
     }, index=idx)
     out = _qfq_adjust(bars, pd.DataFrame())
     assert np.allclose(out["close"], [9.16, 9.31])
+    assert list(out.columns) == ["open", "high", "low", "close", "volume", "amount"]
+
+
+def test_qfq_adjust_future_event_does_not_scale_latest():
+    """除权事件日期晚于数据最后一天（未来预案）：前复权不得缩放任何行，
+    否则最新价被改、实时估值与真实现价对不上（曾导致 +0.59% 假收益）。"""
+    idx = pd.to_datetime(["2026-08-10", "2026-08-11"])
+    bars = pd.DataFrame({
+        "open": [10.0, 10.1], "high": [10.2, 10.3],
+        "low": [9.9, 10.0], "close": [10.0, 10.1],
+        "volume": [1e6, 1e6], "amount": [1e7, 1e7],
+    }, index=idx)
+    xdxr = pd.DataFrame([{
+        "year": 2026, "month": 8, "day": 20,  # 晚于 08-11
+        "fenhong": 3.0, "songzhuangu": 0.0, "peigu": 0.0, "peigujia": 0.0,
+    }])
+    out = _qfq_adjust(bars, xdxr)
+    assert np.allclose(out["close"], [10.0, 10.1])
+    assert np.allclose(out["open"], [10.0, 10.1])
 
 
 def test_bj_bars_uses_market_2():

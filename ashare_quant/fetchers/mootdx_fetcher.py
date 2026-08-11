@@ -54,6 +54,8 @@ def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
     """
     out = bars[["open", "high", "low", "close"]].copy()
     if xdxr is None or xdxr.empty:
+        out["volume"] = bars["volume"]
+        out["amount"] = bars["amount"]
         return out
     events = []
     for _, row in xdxr.iterrows():
@@ -73,7 +75,9 @@ def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
     pos_all = close.index.searchsorted([d for d, *_ in events])
     factor = np.ones(len(bars))
     for (_, fh, sz, pg, price), pos in zip(events, pos_all):
-        if pos <= 0 or pos > len(bars):
+        # pos == len(bars) 表示除权事件日期晚于数据最后一天（未来预案未实施）：
+        # 前复权以最新价为基准，不应缩放任何行（否则会把最新价也改掉）。
+        if pos <= 0 or pos >= len(bars):
             continue
         p_before = close.iloc[pos - 1]
         if not np.isfinite(p_before) or p_before <= 0:
