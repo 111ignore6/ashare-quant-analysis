@@ -541,12 +541,42 @@ with tab_decision:
         hist_all = load_history(history_path) if history_path.exists() else []
         hist_live = [e for e in hist_all if e.get("mode") == "live"] or hist_all
         if len(hist_live) >= 2:
-            cur_syms = {p["symbol"] for p in hist_live[-1].get("picks", [])}
-            prev_syms = {p["symbol"] for p in hist_live[-2].get("picks", [])}
-            diff_rows = [{"代码": s, "变化": "持有"} for s in sorted(cur_syms & prev_syms)]
-            diff_rows += [{"代码": s, "变化": "新增"} for s in sorted(cur_syms - prev_syms)]
-            diff_rows += [{"代码": s, "变化": "卖出"} for s in sorted(prev_syms - cur_syms)]
-            st.dataframe(pd.DataFrame(diff_rows, columns=["代码", "变化"]), width="stretch")
+            cur_dec, prev_dec = hist_live[-1], hist_live[-2]
+            cur_date, prev_date = cur_dec.get("date", "?"), prev_dec.get("date", "?")
+            cur_map = {p["symbol"]: p for p in cur_dec.get("picks", [])}
+            prev_map = {p["symbol"]: p for p in prev_dec.get("picks", [])}
+            cur_syms, prev_syms = set(cur_map), set(prev_map)
+            diff_rows = []
+            for s in sorted(cur_syms - prev_syms):
+                p = cur_map[s]
+                diff_rows.append({"代码": s, "变化": "🆕 新增", "当前权重": p.get("weight"),
+                                  "预期收益(20日)": p.get("score"), "_score": p.get("score")})
+            for s in sorted(prev_syms - cur_syms):
+                p = prev_map[s]
+                diff_rows.append({"代码": s, "变化": "➖ 卖出", "当前权重": None,
+                                  "预期收益(20日)": p.get("score"), "_score": p.get("score")})
+            for s in sorted(cur_syms & prev_syms):
+                p = cur_map[s]
+                diff_rows.append({"代码": s, "变化": "✅ 持有", "当前权重": p.get("weight"),
+                                  "预期收益(20日)": p.get("score"), "_score": p.get("score")})
+            order = {"🆕 新增": 0, "➖ 卖出": 1, "✅ 持有": 2}
+            diff_rows.sort(key=lambda r: (order[r["变化"]], -((r["_score"] or 0))))
+            for row in diff_rows:
+                row.pop("_score", None)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("🆕 新增", f"{len(cur_syms - prev_syms)} 只")
+            m2.metric("➖ 卖出", f"{len(prev_syms - cur_syms)} 只")
+            m3.metric("✅ 持有", f"{len(cur_syms & prev_syms)} 只")
+            df_diff = pd.DataFrame(diff_rows, columns=["代码", "变化", "当前权重", "预期收益(20日)"])
+            if "当前权重" in df_diff.columns:
+                df_diff["当前权重"] = df_diff["当前权重"].map(
+                    lambda v: f"{v:.1%}" if pd.notna(v) else "-")
+            if "预期收益(20日)" in df_diff.columns:
+                df_diff["预期收益(20日)"] = df_diff["预期收益(20日)"].map(
+                    lambda v: f"{v:.2%}" if pd.notna(v) else "-")
+            st.caption(f"对比 {prev_date} → {cur_date}：新增=本期新买入（按预期收益降序），"
+                       "卖出=上期持有本期剔除，持有=两期都在。")
+            st.dataframe(df_diff, width="stretch")
         else:
             st.caption("暂无上一决策日对比（账户刚开始记录）。")
 
