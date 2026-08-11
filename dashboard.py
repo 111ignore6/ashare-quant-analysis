@@ -173,6 +173,40 @@ def format_pct_nan(v) -> str:
     return "—" if pd.isna(v) else f"{v:+.2%}"
 
 
+def render_realtime_valuation(decision: dict, data_dir: Path, key: str) -> None:
+    """盘中实时估值（快照价）：开关开启才拉行情，避免每次刷新变慢。"""
+    if decision is None or not decision.get("picks"):
+        return
+    if not st.toggle("盘中实时估值（快照价，秒级）", value=False, key=key):
+        return
+    try:
+        snap = snapshot([p["symbol"] for p in decision["picks"]])
+        if snap.empty:
+            st.warning("未获取到实时行情（可能非交易时段或接口限流）。")
+            return
+        close_panel = load_panel_close(data_dir)
+        d0 = pd.Timestamp(decision["date"])
+        pick_syms = [p["symbol"] for p in decision["picks"]]
+        prices = snap.set_index("代码")["现价"].astype(float)
+        fallback = close_panel.iloc[-1].reindex(pick_syms)
+        if close_panel is not None and d0 in close_panel.index:
+            fallback = fallback.fillna(close_panel.loc[d0, pick_syms])
+        prices = prices.reindex(fallback.index).fillna(fallback)
+        acc = account_snapshot(decision, close_panel, prices=prices)
+        if acc is None:
+            st.warning("无法按实时价估值（缺少决策日基准）。")
+            return
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("实时总资产", f"{acc['total_asset']:,.0f} 元")
+        r2.metric("实时总收益", f"{acc['total_return']:+.2%}")
+        r3.metric("实时浮动盈亏", f"{acc['total_pnl']:+,.0f} 元")
+        r4.metric("现金余额", f"{acc['cash']:,.0f} 元")
+        st.caption("按决策日收盘成本 × 快照现价逐只估值；缺失行情用本地最新收盘价兜底。"
+                   "收盘后与「账户」页一致。")
+    except Exception as e:  # noqa: BLE001
+        st.error(f"实时估值获取失败：{e}")
+
+
 @st.cache_data(ttl=60)
 def auto_update_status() -> str:
     """读取 Windows 计划任务状态（只读）。"""
@@ -366,7 +400,8 @@ with tab_overview:
         a3.metric("总收益率", f"{account['total_return']:+.2%}")
         a4.metric("浮动盈亏", f"{account['total_pnl']:+,.0f} 元")
         st.caption(f"按决策日 {decision['date']} 收盘买入、最新收盘价 {account['as_of']} 估值；"
-                   "模拟研究，不构成投资建议。")
+                   "（收盘价口径，每日更新后刷新；盘中实时估值见下方开关）。")
+        render_realtime_valuation(decision, data_dir, key="overview_rt")
     st.caption(f"每日自动更新：{auto_update_status()}（可在 start.bat 菜单 8 切换，默认开启）")
 
     if not manifest:
@@ -526,7 +561,9 @@ with tab_account:
     st.subheader("模拟账户净值（自首个正式决策日跟踪）")
     st.caption("账户自首个正式决策日（样本外）开始逐日盯市值；"
                "决策每日收盘后生成，收益随每日更新持续累积。"
+               "曲线为收盘价口径（每日更新后刷新）；盘中实时估值见下方开关。"
                "历史策略表现请参考「模拟盘」页。")
+    render_realtime_valuation(decision, data_dir, key="account_rt")
     equity_csv = load_csv(data_dir / "portfolio" / "account_equity.csv")
     acc_summary = load_json(data_dir / "portfolio" / "account_summary.json")
     history_path = data_dir / "portfolio" / "account_history.jsonl"
