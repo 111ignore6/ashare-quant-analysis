@@ -648,7 +648,39 @@ with tab_realtime:
                            "可切换数据源重试。")
             else:
                 close_panel = load_panel_close(data_dir)
-                if close_panel is not None and pd.Timestamp(decision["date"]) in close_panel.index:
+                acc_realtime = None
+                d0 = pd.Timestamp(decision["date"])
+                if close_panel is not None and d0 in close_panel.index:
+                    # 实时估值：快照现价优先，缺失（停牌等）依次用本地最新收盘价、
+                    # 决策日收盘价兜底（保持估值连续）
+                    prices = snap.set_index("代码")["现价"].astype(float)
+                    pick_syms = [p["symbol"] for p in decision["picks"]]
+                    fallback = close_panel.iloc[-1].reindex(pick_syms)
+                    fallback = fallback.fillna(close_panel.loc[d0, pick_syms])
+                    prices = prices.reindex(fallback.index).fillna(fallback)
+                    try:
+                        acc_realtime = account_snapshot(decision, close_panel, prices=prices)
+                    except Exception:  # noqa: BLE001
+                        acc_realtime = None
+                    if acc_realtime is not None:
+                        st.subheader("实时账户估值（按快照现价）")
+                        r1, r2, r3, r4 = st.columns(4)
+                        r1.metric("实时总资产", f"{acc_realtime['total_asset']:,.0f} 元")
+                        r2.metric("实时总收益", f"{acc_realtime['total_return']:+.2%}")
+                        r3.metric("实时浮动盈亏", f"{acc_realtime['total_pnl']:+,.0f} 元")
+                        r4.metric("现金余额", f"{acc_realtime['cash']:,.0f} 元")
+                        st.caption("按决策日收盘成本 × 实时现价逐只估值；停牌/未取到行情"
+                                   "的股票用本地最新收盘价兜底。收盘后与「账户」页一致。")
+                        # 每只股票实时收益列（数值版，先于下方格式化）
+                        rows_r = acc_realtime["rows"].rename(columns={
+                            "现价": "实时价", "市值": "持仓市值",
+                            "浮动盈亏": "实时盈亏(元)", "盈亏率": "实时盈亏率",
+                        })
+                        snap = snap.merge(
+                            rows_r[["代码", "成本价", "实时价", "持仓市值",
+                                    "实时盈亏(元)", "实时盈亏率"]],
+                            on="代码", how="left")
+                if close_panel is not None and d0 in close_panel.index:
                     base = close_panel.loc[pd.Timestamp(decision["date"]), snap["代码"]]
                     snap["决策日收盘"] = base.to_numpy()
                     snap["自决策日涨跌"] = snap["现价"] / snap["决策日收盘"] - 1
@@ -656,6 +688,20 @@ with tab_realtime:
                         lambda v: f"{v:+.2%}" if pd.notna(v) else "-")
                     snap["决策日收盘"] = snap["决策日收盘"].map(
                         lambda v: f"{v:.2f}" if pd.notna(v) else "-")
+                if acc_realtime is not None:
+                    for col in ("成本价", "实时价"):
+                        if col in snap.columns:
+                            snap[col] = snap[col].map(
+                                lambda v: f"{v:.2f}" if pd.notna(v) else "-")
+                    if "持仓市值" in snap.columns:
+                        snap["持仓市值"] = snap["持仓市值"].map(
+                            lambda v: f"{v:,.0f}" if pd.notna(v) else "-")
+                    if "实时盈亏(元)" in snap.columns:
+                        snap["实时盈亏(元)"] = snap["实时盈亏(元)"].map(
+                            lambda v: f"{v:+,.0f}" if pd.notna(v) else "-")
+                    if "实时盈亏率" in snap.columns:
+                        snap["实时盈亏率"] = snap["实时盈亏率"].map(
+                            lambda v: f"{v:+.2%}" if pd.notna(v) else "-")
                 snap["涨跌幅"] = snap["涨跌幅"].map(lambda v: f"{v:+.2%}")
                 for col in ("现价", "今开", "最高", "最低", "昨收"):
                     if col in snap.columns:
@@ -663,7 +709,8 @@ with tab_realtime:
                             lambda v: f"{v:.2f}" if pd.notna(v) else "-")
                 st.dataframe(snap, width="stretch")
                 st.caption(f"决策日期 {decision['date']}，共 {len(snap)} 只；"
-                           "「自决策日涨跌」为现价相对决策日收盘的变化。")
+                           "「自决策日涨跌」为现价相对决策日收盘的变化，"
+                           "「实时盈亏率」为现价相对持仓成本。")
         except Exception as e:  # noqa: BLE001
             st.error(f"实时行情获取失败：{e}")
 
