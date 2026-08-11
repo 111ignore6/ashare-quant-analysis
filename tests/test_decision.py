@@ -26,3 +26,16 @@ def test_train_decide_roundtrip(tmp_path):
     picks = decide(loaded, X, close, last_date, top_n=5)
     assert len(picks) == 5
     assert abs(picks["weight"].sum() - 1.0) < 1e-9
+
+
+def test_decide_ignores_target_column(tmp_path):
+    """特征缓存可能含 target 列（features.parquet 16 列），predict 前必须排除。"""
+    close, volume, index_close = _market()
+    X, y = build_dataset(close, volume, index_close, horizon=20)
+    meta = train_and_save(X, y, tmp_path, model_names=("lgbm",), sample_size=2000)
+    loaded = load_models(tmp_path)
+    last_date = X.index.get_level_values("date").max()
+    X_with_target = X.copy()
+    X_with_target["target"] = 0.0
+    picks = decide(loaded, X_with_target, close, last_date, top_n=5)
+    assert len(picks) == 5

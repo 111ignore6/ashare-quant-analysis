@@ -69,6 +69,8 @@ def decide(models: dict, X: pd.DataFrame, close: pd.DataFrame,
     rows = X[X.index.get_level_values("date") == pd.Timestamp(date)]
     if rows.empty:
         raise ValueError(f"日期 {date} 无特征数据")
+    # 特征缓存可能含 target 列，预测前排除（模型按特征列训练）
+    rows = rows.drop(columns=[c for c in ("target",) if c in rows.columns])
     preds = pd.DataFrame({name: m.predict(rows) for name, m in models["models"].items()},
                          index=rows.index)
     model_names = list(preds.columns)
