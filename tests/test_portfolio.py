@@ -89,6 +89,9 @@ def test_update_portfolio_end_to_end(tmp_path):
     assert summary["decisions"] >= 1
     assert summary["total_asset"] > 0
     assert (tmp_path / "account_summary.json").exists()
+    csv = pd.read_csv(tmp_path / "account_equity.csv", index_col=0, parse_dates=True)
+    assert len(csv) >= 1
+    assert csv.iloc[0, 0] == 100000.0  # 首行为建仓基准点（初始资金）
 
 
 def test_monthly_returns_table():
@@ -106,7 +109,9 @@ def test_recompute_account_uses_capital():
     close = _close()
     history = _history()
     equity, metrics = recompute_account(history, close, capital=200000.0)
-    assert abs(equity.iloc[0] - 200000.0 * 1.045) < 1e-6
+    # 首个决策日 08-03 是建仓基准点；08-04 起是收益点
+    assert equity.iloc[0] == 200000.0
+    assert abs(equity.iloc[1] - 200000.0 * 1.045) < 1e-6
     assert metrics["annual_return"] != 0 or len(equity) == 1
 
 

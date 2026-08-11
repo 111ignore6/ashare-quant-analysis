@@ -134,8 +134,21 @@ def recompute_account(history: list[dict], close: pd.DataFrame,
     if returns.empty:
         return pd.Series(dtype=float), {}
     equity = (1 + returns.fillna(0)).cumprod() * capital
+    equity = _prepend_start_point(history, equity, capital)
     metrics = metrics_from_returns(returns, periods_per_year=252)
     return equity, metrics
+
+
+def _prepend_start_point(history: list[dict], equity: pd.Series,
+                         capital: float) -> pd.Series:
+    """在净值曲线前补上首个决策日的建仓基准点（初始资金）。"""
+    entries = [e for e in history if e.get("mode") == "live"] or history
+    if not entries:
+        return equity
+    start = pd.Timestamp(entries[0]["date"])
+    if start in equity.index:
+        return equity
+    return pd.concat([pd.Series([float(capital)], index=[start]), equity]).sort_index()
 
 
 def build_trade_ledger(history: list[dict], close: pd.DataFrame,
@@ -217,6 +230,7 @@ def update_portfolio(close: pd.DataFrame, cfg, portfolio_dir: Path,
     history = load_history(history_path)
     returns = equity_curve(close, history, float(cfg.initial_capital))
     equity = ((1 + returns.fillna(0)).cumprod() * float(cfg.initial_capital))
+    equity = _prepend_start_point(history, equity, float(cfg.initial_capital))
     equity.to_csv(portfolio_dir / EQUITY_FILENAME, encoding="utf-8-sig")
     metrics = metrics_from_returns(returns, periods_per_year=252)
     live_decisions = len([e for e in history if e.get("mode") == "live"])
