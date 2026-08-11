@@ -3,6 +3,30 @@ from __future__ import annotations
 import pandas as pd
 
 
+def market_session(now=None) -> str:
+    """返回当前市场时段（按工作日时间判断，不区分节假日）：
+
+    pre 盘前(<09:15) / am 上午盘中(09:15-11:30) / lunch 午间休市(11:30-13:00)
+    pm 下午盘中(13:00-15:00) / post 收盘后(15:00+) / weekend 周末。
+
+    用途：盘中当日日线未收盘确认，备源（新浪/akshare）当日数据要收盘后才有；
+    此时应避免无意义的备源等待，提示用户以收盘后/16:05 自动更新为准。
+    """
+    now = pd.Timestamp.now() if now is None else pd.Timestamp(now)
+    hm = now.hour * 60 + now.minute + now.second / 60.0
+    if now.weekday() >= 5:
+        return "weekend"
+    if hm < 9 * 60 + 15:
+        return "pre"
+    if hm < 11 * 60 + 30:
+        return "am"
+    if hm < 13 * 60:
+        return "lunch"
+    if hm < 15 * 60:
+        return "pm"
+    return "post"
+
+
 class TradingCalendar:
     """由日期序列构造的交易日历（去重、升序）。"""
 

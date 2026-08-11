@@ -205,6 +205,7 @@ def cmd_daily(args) -> None:
     import time
 
     from .daily import update_daily
+    from .calendar import market_session
     from .pipeline import build_panels
     from .universe import load_universe_cached
 
@@ -239,6 +240,17 @@ def cmd_daily(args) -> None:
                 json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
+
+    session = market_session()
+    if session in ("am", "lunch", "pm"):
+        label = {"am": "上午盘中", "lunch": "午间休市", "pm": "下午盘中"}[session]
+        print(f"提示：现在是{label}（{time.strftime('%H:%M')}），当日日线尚未收盘确认。"
+              f"mootdx 可拉盘中当日 bar；备源（新浪/akshare）当日数据要收盘后才有，"
+              f"北交所等已跳过备源等待。正式数据请以收盘后（15:00 后或 16:05 自动更新）为准。",
+              flush=True)
+    elif session == "weekend":
+        print("提示：今天是周末（非交易日），数据应已是最新；"
+              "如确认有缺失可加 --force 强制重算。", flush=True)
 
     t0 = time.time()
     print("阶段 1/3：增量更新行情数据（有进度条，首次/大涨后约 1-5 分钟）…", flush=True)

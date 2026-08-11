@@ -1,27 +1,28 @@
 """通达信协议数据源（mootdx，1.06k★）。
 
-特点：单次最多返回 800 根日线（实测 ~0.1s），含除权除息信息可自算前复权；
-指数走腾讯（通达信指数协议兼容性差）。服务器为公开行情服务器，稳定性次于
-腾讯直连，作为可选冗余源。
+特点：单次最多返回 800 根日线（实测并发 ~40 只/s），含除权除息信息可自算
+前复权；指数走通达信 index 接口。TCP 7709 协议直连公开行情服务器，不封 IP，
+盘中即有当日日线，适合作为全市场主源。北交所（920 号段）标准服务器无数据，
+由备源（akshare）兜底。
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
-from .tencent_fetcher import fetch_index_daily as _tencent_index
+import threading
 
 _COLS = ["open", "high", "low", "close", "volume", "amount"]
-_client = None
+_tls = threading.local()
+_XDXR_CACHE: dict[str, pd.DataFrame] = {}
 
 
 def _get_client():
-    global _client
-    if _client is None:
+    """每线程独立通达信连接（共享单连接在并发下会被串行化，实测 4只/s→40只/s）。"""
+    if not hasattr(_tls, "client"):
         from mootdx.quotes import Quotes
-        _client = Quotes.factory(market="std")
-    return _client
+        _tls.client = Quotes.factory(market="std")
+    return _tls.client
 
 
 def _to_tdx_code(symbol: str) -> str:
@@ -88,11 +89,27 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
     if bars.empty:
         return pd.DataFrame(columns=_COLS)
     if adjust == "qfq":
-        xdxr = client.xdxr(symbol=_to_tdx_code(symbol))
+        xdxr = _XDXR_CACHE.get(symbol)
+        if xdxr is None:
+            xdxr = client.xdxr(symbol=_to_tdx_code(symbol))
+            _XDXR_CACHE[symbol] = xdxr
         bars = _qfq_adjust(bars, xdxr)
     return bars
 
 
 def fetch_index_daily(symbol: str = "sh000300", start: str | None = None) -> pd.DataFrame:
-    """指数走腾讯源（通达信指数协议兼容性差）。"""
-    return _tencent_index(symbol, start)
+    """指数日线（通达信 index 接口；sh000300 → 000300）。"""
+    code = str(symbol).replace("sh", "").replace("sz", "").replace("bj", "")
+    client = _get_client()
+    bars = client.index(symbol=code, frequency=9, offset=800)
+    if bars is None or bars.empty:
+        return pd.DataFrame(columns=_COLS)
+    bars = bars.copy()
+    if "vol" in bars.columns and "volume" not in bars.columns:
+        bars = bars.rename(columns={"vol": "volume"})
+    bars = bars[["open", "high", "low", "close", "volume", "amount"]].copy()
+    bars.index = pd.to_datetime(bars.index).normalize()
+    bars = bars[~bars.index.duplicated(keep="last")].sort_index()
+    if start:
+        bars = bars.loc[pd.Timestamp(start):]
+    return bars[_COLS]

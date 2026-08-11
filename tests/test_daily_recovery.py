@@ -104,8 +104,9 @@ def test_update_daily_cooldown_skips_recent_failures(tmp_path):
     assert calls == []
 
 
-def test_update_daily_fallback_on_empty_response(tmp_path):
+def test_update_daily_fallback_on_empty_response(tmp_path, monkeypatch):
     """主源返回空（限流/盘中无当日 bar 的误判）时，应交给备源确认补齐。"""
+    monkeypatch.setattr("ashare_quant.daily.market_session", lambda: "post")
     store, codes = _setup(tmp_path, n_stocks=2, index_end="2024-01-04")
     calls = {"primary": 0, "fallback": 0}
 
@@ -128,6 +129,54 @@ def test_update_daily_fallback_on_empty_response(tmp_path):
     assert len(store.load(codes[0])) == 3
 
 
+def test_update_daily_skips_fallback_intraday(tmp_path, monkeypatch):
+    """盘中时段：主源空时不再等备源（新浪当日日线未生成），避免整批拖慢。"""
+    store, codes = _setup(tmp_path, n_stocks=2, index_end="2024-01-04")
+    calls = {"primary": 0, "fallback": 0}
+    monkeypatch.setattr("ashare_quant.daily.market_session", lambda: "lunch")
+
+    def fake_index(symbol):
+        return _df(["2024-01-02", "2024-01-03", "2024-01-04"], [3000, 3010, 3020])
+
+    def empty_fetcher(code, start, end, adjust):
+        calls["primary"] += 1
+        return _df([], [])
+
+    def good_fetcher(code, start, end, adjust):
+        calls["fallback"] += 1
+        return _df(["2024-01-04"], [11.0])
+
+    cfg = Config.from_dict({"years": 1, "retry": 1, "max_workers": 2})
+    out = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                       fetcher=empty_fetcher, fallback_fetcher=good_fetcher)
+    assert out["no_data"] == codes
+    assert calls["fallback"] == 0  # 盘中不等待备源
+
+
+def test_update_daily_uses_fallback_after_hours(tmp_path, monkeypatch):
+    """收盘后：主源空时走备源确认（限流/真停牌）。"""
+    store, codes = _setup(tmp_path, n_stocks=2, index_end="2024-01-04")
+    calls = {"primary": 0, "fallback": 0}
+    monkeypatch.setattr("ashare_quant.daily.market_session", lambda: "post")
+
+    def fake_index(symbol):
+        return _df(["2024-01-02", "2024-01-03", "2024-01-04"], [3000, 3010, 3020])
+
+    def empty_fetcher(code, start, end, adjust):
+        calls["primary"] += 1
+        return _df([], [])
+
+    def good_fetcher(code, start, end, adjust):
+        calls["fallback"] += 1
+        return _df(["2024-01-04"], [11.0])
+
+    cfg = Config.from_dict({"years": 1, "retry": 1, "max_workers": 2})
+    out = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                       fetcher=empty_fetcher, fallback_fetcher=good_fetcher)
+    assert len(out["updated"]) == 2
+    assert calls["fallback"] == 2
+
+
 def test_update_daily_no_data_when_both_sources_empty(tmp_path):
     """主备源都返回空 → no_data（真停牌），不算 failed。"""
     store, codes = _setup(tmp_path, n_stocks=1, index_end="2024-01-04")
@@ -146,7 +195,26 @@ def test_update_daily_no_data_when_both_sources_empty(tmp_path):
 
 
 def test_update_daily_backoff_on_many_failures(tmp_path, monkeypatch):
-    """连续大量失败/空时批量层暂停 60 秒，避免加重行情源风控。"""
+    """连续大量异常失败（非 no_data）时批量层暂停 60 秒，避免加重行情源风控。"""
+    store, codes = _setup(tmp_path, n_stocks=30, index_end="2024-01-04")
+    sleeps = []
+    monkeypatch.setattr("ashare_quant.daily.time.sleep", lambda s: sleeps.append(s))
+
+    def fake_index(symbol):
+        return _df(["2024-01-02", "2024-01-03", "2024-01-04"], [3000, 3010, 3020])
+
+    def failing_fetcher(code, start, end, adjust):
+        raise ConnectionError("timeout")
+
+    cfg = Config.from_dict({"years": 1, "retry": 1, "max_workers": 30})
+    out = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                       fetcher=failing_fetcher, fallback_fetcher=failing_fetcher)
+    assert len(out["failed"]) == 30
+    assert 60 in sleeps
+
+
+def test_update_daily_no_data_does_not_backoff(tmp_path, monkeypatch):
+    """no_data（停牌/盘中未生成）是正常结果，不触发 60 秒退避。"""
     store, codes = _setup(tmp_path, n_stocks=30, index_end="2024-01-04")
     sleeps = []
     monkeypatch.setattr("ashare_quant.daily.time.sleep", lambda s: sleeps.append(s))
@@ -161,7 +229,35 @@ def test_update_daily_backoff_on_many_failures(tmp_path, monkeypatch):
     out = update_daily(codes, store, cfg, index_fetcher=fake_index,
                        fetcher=empty_fetcher, fallback_fetcher=empty_fetcher)
     assert len(out["no_data"]) == 30
-    assert 60 in sleeps
+    assert 60 not in sleeps
+
+
+def test_update_daily_no_data_cooldown_only_after_hours(tmp_path, monkeypatch):
+    """盘中 no_data 不写冷却（收盘后要重试）；收盘后 no_data 才冷却（真停牌）。"""
+    store, codes = _setup(tmp_path, n_stocks=2, index_end="2024-01-04")
+
+    def fake_index(symbol):
+        return _df(["2024-01-02", "2024-01-03", "2024-01-04"], [3000, 3010, 3020])
+
+    def empty_fetcher(code, start, end, adjust):
+        return _df([], [])
+
+    cfg = Config.from_dict({"years": 1, "retry": 1, "max_workers": 2})
+
+    # 盘中：no_data 不写冷却
+    monkeypatch.setattr("ashare_quant.daily.market_session", lambda: "lunch")
+    out1 = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                        fetcher=empty_fetcher, fallback_fetcher=empty_fetcher)
+    assert out1["no_data"] == codes
+    assert not (tmp_path / "update_failed.json").exists()
+
+    # 收盘后：no_data 写冷却
+    monkeypatch.setattr("ashare_quant.daily.market_session", lambda: "post")
+    out2 = update_daily(codes, store, cfg, index_fetcher=fake_index,
+                        fetcher=empty_fetcher, fallback_fetcher=empty_fetcher)
+    assert out2["no_data"] == codes
+    failed = json.loads((tmp_path / "update_failed.json").read_text(encoding="utf-8"))
+    assert set(failed) == set(codes)
 
 
 def test_update_daily_retries_then_fails(tmp_path):

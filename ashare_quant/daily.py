@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from concurrent.futures import ThreadPoolExecutor
 import time
 
@@ -7,6 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from .cache import ParquetStore
+from .calendar import market_session
 from .config import Config
 
 
@@ -117,6 +119,7 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
             return "no_data"
 
         sources = [fetcher] + ([fallback_fetcher] if fallback_fetcher else [])
+        intraday = market_session() in ("am", "lunch", "pm")
         final = "failed"
         for f in sources:
             is_last_source = f is sources[-1]
@@ -131,7 +134,11 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 if status in ("updated", "up_to_date"):
                     return status, code
                 if status == "no_data" and not is_last_source:
-                    # 主源返回空：可能是限流/盘中当日 bar 未生成，交给备源确认；
+                    if intraday:
+                        # 盘中：备源（新浪/akshare）当日日线尚未生成，等待只会拖慢
+                        # 整批更新；直接记为 no_data，收盘后（15:00 后）再走备源。
+                        return "no_data", code
+                    # 收盘后主源仍返回空：可能是限流或真停牌，交给备源确认；
                     # 真停牌时备源同样返回空，结果仍为 no_data。
                     break
                 final = "failed" if status == "error" else status
@@ -140,16 +147,19 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
 
     updated, up_to_date, failed, no_data = [], [], [], []
     consecutive_errors = 0
+    # 非终端环境（重定向/仪表盘后台）下 tqdm 会卡住批量迭代，改用定期打印进度
+    use_progress = len(codes_to_update) >= 50 and sys.stderr.isatty()
     with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:
-        for status, code in tqdm(ex.map(_update_one, codes_to_update),
-                                 total=len(codes_to_update),
-                                 desc="增量更新", unit="只",
-                                 disable=len(codes_to_update) < 50):
-            if status in ("failed", "no_data"):
+        mapped = (tqdm(ex.map(_update_one, codes_to_update),
+                       total=len(codes_to_update), desc="增量更新", unit="只")
+                  if use_progress else ex.map(_update_one, codes_to_update))
+        for i, (status, code) in enumerate(mapped):
+            if status == "failed":
+                # 仅"异常失败"（主备源均报错，如风控/断连）触发退避；
+                # no_data（停牌/盘中未生成）是正常结果，不参与，避免整批被拖慢。
                 consecutive_errors += 1
                 if consecutive_errors >= 25:
-                    # 连续大量失败/空：疑似行情源风控或盘中未到收盘，暂停避免加重封锁
-                    print("连续 25 只更新失败/无数据，疑似行情源风控或未到收盘，"
+                    print("连续 25 只更新失败，疑似行情源风控/断连，"
                           "暂停 60 秒再继续…", flush=True)
                     time.sleep(60)
                     consecutive_errors = 0
@@ -157,9 +167,19 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
                 consecutive_errors = 0
             {"updated": updated, "up_to_date": up_to_date, "failed": failed,
              "no_data": no_data}[status].append(code)
+            if not use_progress and (i + 1) % 200 == 0:
+                print(f"…增量更新 {i + 1}/{len(codes_to_update)}："
+                      f"已更新 {len(updated)}，失败 {len(failed)}，无数据 {len(no_data)}",
+                      flush=True)
     if failed or no_data:
-        failed_cache.update({c: today for c in failed + no_data})
-        _save_failed_cache(store, failed_cache)
+        # failed（风控/断连）总是冷却防反复；no_data 只在收盘后写冷却——
+        # 盘中/盘前的 no_data 多为"当日日线尚未生成"，冷却会挡住收盘后的正常重试。
+        session = market_session()
+        failed_cache.update({c: today for c in failed})
+        if session not in ("pre", "am", "lunch", "pm"):
+            failed_cache.update({c: today for c in no_data})
+        if failed_cache:
+            _save_failed_cache(store, failed_cache)
     return {"new_index_date": str(last.date()), "updated": sorted(updated),
             "up_to_date": sorted(up_to_date), "failed": sorted(failed),
             "no_data": sorted(no_data), "new_data": True,
