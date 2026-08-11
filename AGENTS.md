@@ -18,6 +18,13 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
   市场号 **2（MARKET_BJ）**。mootdx 库自己的 `get_stock_market()` 会把 920
   误判为沪市导致返回空——`mootdx_fetcher._bj_bars()` 已绕过（`get_security_bars(9, 2, ...)`）。
   旧号段 43/83/87 已迁移作废，会返回空/僵尸数据，不要用。
+- **mootdx xdxr 混有全 NaN 的公告日行**：`float(row.get("fenhong") or 0)` 在
+  NaN 时得到 NaN（NaN 是 truthy），`after <= 0` 拦不住 NaN，会把
+  `factor[:pos] *= NaN` 把该事件之前**整个前复权历史抹成 NaN**（2026-08-11
+  17:13 重拉后 600000 等大量股票 2025-10-27 前全 NaN、特征缓存缩水 3 倍）。
+  已修复：字段按 `pd.notna`→0 解析 + `np.isfinite(after)` 守卫 + 回归测试
+  （`test_qfq_adjust_ignores_nan_xdxr_rows`）。改复权逻辑后必须抽查全市场
+  历史 NaN 率，别只看最新几行。
 - **腾讯直连**：快（22只/s）但高频会被 WAF 风控（返回 501 反爬页）。遇到 501
   必须抛异常（`tencent_fetcher._kline` 已处理），**不能静默当"无数据"**，否则
   会把整批股票误判成停牌写进冷却表。封禁通常几小时后自动解除。

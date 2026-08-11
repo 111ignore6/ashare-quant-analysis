@@ -66,6 +66,39 @@ def test_qfq_adjust_future_event_does_not_scale_latest():
     assert np.allclose(out["open"], [10.0, 10.1])
 
 
+def test_qfq_adjust_ignores_nan_xdxr_rows():
+    """xdxr 含全 NaN 的公告日行时不得把历史因子污染成 NaN。
+
+    回归：2026-08-11 17:13 重拉后，600000 等大量股票 2025-10-27 之前的
+    历史 close 全变 NaN，根因是 float(NaN or 0) 得到 NaN、after<=0 拦不住
+    NaN，factor[:pos] *= NaN 抹掉整个前复权历史。
+    """
+    idx = pd.to_datetime(["2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17"])
+    bars = pd.DataFrame({
+        "open": [9.20, 9.08, 8.92, 8.85],
+        "high": [9.22, 9.31, 8.95, 8.88],
+        "low": [9.10, 9.00, 8.80, 8.82],
+        "close": [9.16, 9.31, 8.85, 8.87],
+        "volume": [1e6] * 4,
+        "amount": [9e6] * 4,
+    }, index=idx)
+    # 公告日行：字段全 NaN；随后一个真实分红事件（10 派 4.2 元）
+    xdxr = pd.DataFrame([
+        {"year": 2026, "month": 7, "day": 10,
+         "fenhong": None, "songzhuangu": None, "peigu": None, "peigujia": None},
+        {"year": 2026, "month": 7, "day": 16,
+         "fenhong": 4.2, "songzhuangu": 0.0, "peigu": 0.0, "peigujia": 0.0},
+    ])
+    out = _qfq_adjust(bars, xdxr)
+    assert out["close"].notna().all()
+    # 真实分红事件仍生效：7-15 之前按 (9.31-0.42)/9.31 缩放
+    expected = (9.31 - 0.42) / 9.31
+    assert abs(out.loc["2026-07-15", "close"] - 9.31 * expected) < 1e-9
+    # 除权日及之后不受影响
+    assert out.loc["2026-07-16", "close"] == 8.85
+    assert out.loc["2026-07-17", "close"] == 8.87
+
+
 def test_bj_bars_uses_market_2():
     """北交所 920 走市场号 2（mootdx 默认判断会把 920 误判为沪市）。"""
     raw = [{

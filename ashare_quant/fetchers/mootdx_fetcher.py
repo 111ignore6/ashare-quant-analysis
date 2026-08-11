@@ -59,9 +59,16 @@ def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
         return out
     events = []
     for _, row in xdxr.iterrows():
-        fh = float(row.get("fenhong") or 0)
-        sz = float(row.get("songzhuangu") or 0)
-        pg = float(row.get("peigu") or 0)
+        # xdxr 里混有大量"公告日/股东大会日"行（分红送配字段全为 NaN），
+        # 必须按 NaN→0 处理；若用 float(NaN or 0) 会得到 NaN（NaN 为真值），
+        # 随后 after=NaN 会把该事件之前全部历史因子乘成 NaN。
+        def _num(key: str) -> float:
+            v = row.get(key)
+            return float(v) if v is not None and pd.notna(v) else 0.0
+
+        fh = _num("fenhong")
+        sz = _num("songzhuangu")
+        pg = _num("peigu")
         if fh == 0 and sz == 0 and pg == 0:
             continue
         try:
@@ -69,7 +76,7 @@ def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
                                 day=int(row["day"]))
         except (KeyError, ValueError, TypeError):
             continue
-        events.append((date, fh, sz, pg, float(row.get("peigujia") or 0)))
+        events.append((date, fh, sz, pg, _num("peigujia")))
     events.sort()
     close = bars["close"]
     pos_all = close.index.searchsorted([d for d, *_ in events])
@@ -83,7 +90,9 @@ def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
         if not np.isfinite(p_before) or p_before <= 0:
             continue
         after = (p_before - fh / 10 + pg / 10 * price) / (1 + sz / 10 + pg / 10)
-        if after <= 0:
+        # NaN 因子（如配股价缺失导致 after 非有限）会污染 factor[:pos]，
+        # 必须显式跳过，否则整个前复权历史变 NaN。
+        if not np.isfinite(after) or after <= 0:
             continue
         factor[:pos] *= after / p_before
     out = out.mul(factor, axis=0)
