@@ -52,14 +52,16 @@ def _save_failed_cache(store: ParquetStore, failed: dict) -> None:
 
 
 def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
-                 index_fetcher=None, fetcher=None, index_symbol: str = "sh000300") -> dict:
-    fallback_fetcher = None
+                 index_fetcher=None, fetcher=None, fallback_fetcher=None,
+                 index_symbol: str = "sh000300") -> dict:
     if index_fetcher is None:
         from .fetchers import resolve_fetchers
-        _, index_fetcher, fallback_fetcher = resolve_fetchers(cfg)
+        _, index_fetcher, fb = resolve_fetchers(cfg)
+        fallback_fetcher = fallback_fetcher or fb
     if fetcher is None:
         from .fetchers import resolve_fetchers
-        fetcher, _, fallback_fetcher = resolve_fetchers(cfg)
+        fetcher, _, fb = resolve_fetchers(cfg)
+        fallback_fetcher = fallback_fetcher or fb
     manifest = store.read_manifest()
     prev_index_end = manifest.get(index_symbol, {}).get("end")
     idx_start = (pd.Timestamp(prev_index_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d") \
@@ -96,7 +98,8 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
     codes_to_update = [c for c in codes_to_update if c not in cooldown]
     if prev_index_end and str(last.date()) == prev_index_end and not codes_to_update:
         return {"new_index_date": str(last.date()), "updated": [], "up_to_date": "all",
-                "failed": [], "new_data": False, "stale": len(stale)}
+                "failed": [], "new_data": False, "stale": len(stale),
+                "cooldown_skipped": True}
 
     def _update_one(code: str) -> tuple[str, str]:
         def _fetch_attempt(f) -> str:
@@ -114,22 +117,44 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
             return "no_data"
 
         sources = [fetcher] + ([fallback_fetcher] if fallback_fetcher else [])
+        final = "failed"
         for f in sources:
+            is_last_source = f is sources[-1]
             for attempt in range(max(1, cfg.retry)):
                 try:
-                    return _fetch_attempt(f), code
+                    status = _fetch_attempt(f)
                 except Exception:
-                    if attempt == max(1, cfg.retry) - 1:
-                        break
-                    time.sleep(0.5)
-        return "failed", code
+                    status = "error"
+                    if attempt < max(1, cfg.retry) - 1:
+                        time.sleep(0.5)
+                        continue
+                if status in ("updated", "up_to_date"):
+                    return status, code
+                if status == "no_data" and not is_last_source:
+                    # 主源返回空：可能是限流/盘中当日 bar 未生成，交给备源确认；
+                    # 真停牌时备源同样返回空，结果仍为 no_data。
+                    break
+                final = "failed" if status == "error" else status
+                break
+        return final, code
 
     updated, up_to_date, failed, no_data = [], [], [], []
+    consecutive_errors = 0
     with ThreadPoolExecutor(max_workers=max(1, cfg.max_workers)) as ex:
         for status, code in tqdm(ex.map(_update_one, codes_to_update),
                                  total=len(codes_to_update),
                                  desc="增量更新", unit="只",
                                  disable=len(codes_to_update) < 50):
+            if status in ("failed", "no_data"):
+                consecutive_errors += 1
+                if consecutive_errors >= 25:
+                    # 连续大量失败/空：疑似行情源风控或盘中未到收盘，暂停避免加重封锁
+                    print("连续 25 只更新失败/无数据，疑似行情源风控或未到收盘，"
+                          "暂停 60 秒再继续…", flush=True)
+                    time.sleep(60)
+                    consecutive_errors = 0
+            else:
+                consecutive_errors = 0
             {"updated": updated, "up_to_date": up_to_date, "failed": failed,
              "no_data": no_data}[status].append(code)
     if failed or no_data:

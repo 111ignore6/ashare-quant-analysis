@@ -1,6 +1,7 @@
 import pandas as pd
+import pytest
 
-from ashare_quant.fetchers.tencent_fetcher import _parse_kline, to_tx_code
+from ashare_quant.fetchers.tencent_fetcher import _kline, _parse_kline, to_tx_code
 
 
 def test_to_tx_code():
@@ -32,3 +33,19 @@ def test_parse_kline_empty():
     df = _parse_kline([])
     assert df.empty
     assert list(df.columns) == ["open", "high", "low", "close", "volume", "amount"]
+
+
+def test_kline_waf_501_raises(monkeypatch):
+    """腾讯 WAF 501 反爬页必须抛异常，不能被静默当成无数据（防误判停牌）。"""
+    import ashare_quant.fetchers.tencent_fetcher as tf
+
+    class FakeResp:
+        status_code = 501
+        text = "<html>waf.tencent.com/501page.html</html>"
+
+        def raise_for_status(self):
+            raise RuntimeError("501")
+
+    monkeypatch.setattr(tf.requests, "get", lambda *a, **k: FakeResp())
+    with pytest.raises(RuntimeError, match="风控"):
+        _kline("sh600000", "2026-08-10", "2026-08-11", "qfq")

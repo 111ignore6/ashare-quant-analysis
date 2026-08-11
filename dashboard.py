@@ -327,7 +327,7 @@ with tab_overview:
     st.subheader("系统状态与快速操作")
     manifest = load_json(data_dir / "manifest.json") if data_dir.exists() else None
     model_meta = load_json(model_dir / "meta.json")
-    decision = load_json(PROJECT / "docs/decision" / "decision.json")
+    decision = load_json(sim_dir / "decision.json")
     stocks = {k: v for k, v in (manifest or {}).items() if k != "sh000300"}
     idx_end = (manifest or {}).get("sh000300", {}).get("end")
     stale = [k for k, v in stocks.items()

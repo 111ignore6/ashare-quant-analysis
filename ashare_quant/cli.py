@@ -248,8 +248,13 @@ def cmd_daily(args) -> None:
     print(f"指数截止={out['new_index_date']} 更新={len(out['updated'])} "
           f"已最新={n_up} 失败={len(out['failed'])}", flush=True)
     if out.get("stale"):
-        print(f"检测到 {out['stale']} 只股票数据落后（上次更新可能中断），"
-              f"已补齐 {len(out['updated'])} 只", flush=True)
+        if out.get("cooldown_skipped"):
+            print(f"有 {out['stale']} 只股票数据落后，但今日处于失败冷却"
+                  f"（停牌/接口异常，为避免反复重试已跳过）；"
+                  f"明日自动重试，或清除 update_failed.json 后立即补拉", flush=True)
+        else:
+            print(f"检测到 {out['stale']} 只股票数据落后（上次更新可能中断），"
+                  f"已补齐 {len(out['updated'])} 只", flush=True)
     if out["failed"]:
         print("更新失败：", ",".join(out["failed"][:20]), flush=True)
         if len(out["failed"]) > 20:

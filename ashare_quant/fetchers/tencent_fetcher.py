@@ -47,8 +47,9 @@ def _kline(symbol: str, start: str, end: str, adjust: str) -> pd.DataFrame:
     url = f"{_KLINE_URL}?param={symbol},day,{start},{end},640,{adjust}"
     resp = requests.get(url, timeout=_REQUEST_TIMEOUT, headers=_UA)
     if resp.status_code == 501 or resp.status_code >= 500:
-        # 腾讯对部分"无数据"区间偶发 501：视为空区间，不中断整批
-        return pd.DataFrame(columns=_COLS)
+        # 腾讯 WAF/风控返回 501 反爬页；静默当"无数据"会把大批股票误判为停牌
+        # 并写进失败冷却。改为抛异常：上游重试 + 备源确认，批量层触发退避。
+        raise RuntimeError(f"腾讯行情源风控/服务器错误（HTTP {resp.status_code}）")
     resp.raise_for_status()
     data = resp.json()
     if "data" not in data or symbol not in data["data"]:
