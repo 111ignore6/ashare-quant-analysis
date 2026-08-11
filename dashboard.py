@@ -107,9 +107,12 @@ def load_json(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-@st.cache_data(ttl=60)
 def load_decision(sim_dir: Path) -> dict | None:
-    """读取最新决策：兼容多个输出目录（计划任务历史写 docs/simulation）。"""
+    """读取最新决策：兼容多个输出目录（计划任务历史写 docs/simulation）。
+
+    普通函数（非 st.cache_data）：内部直接读文件，避免嵌套缓存调用——
+    Streamlit 的 cache_data 嵌套在跨刷新读取时可能抛 KeyError。
+    """
     candidates = [
         sim_dir / "decision.json",
         PROJECT / "docs" / "simulation" / "decision.json",
@@ -117,7 +120,10 @@ def load_decision(sim_dir: Path) -> dict | None:
     ]
     best = None
     for p in candidates:
-        d = load_json(p)
+        try:
+            d = json.loads(Path(p).read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
         if d and (best is None or str(d.get("date", "")) > str(best.get("date", ""))):
             best = d
     return best

@@ -28,3 +28,14 @@ def test_dashboard_smoke(monkeypatch):
     at.run(timeout=180)
     assert not at.exception, [e.value for e in at.exception]
     assert len(at.tabs) >= 8
+
+
+def test_dashboard_smoke_cross_refresh(monkeypatch):
+    """跨刷新缓存路径回归：st.cache_data 嵌套曾导致 KeyError，连续运行必须稳定。"""
+    monkeypatch.setattr("easyquotation.use", lambda source: _FakeEQ())
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(PROJ / "dashboard.py"), default_timeout=180)
+    for _ in range(3):
+        at.run(timeout=180)
+        assert not at.exception, [e.value for e in at.exception]
