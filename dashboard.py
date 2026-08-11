@@ -28,6 +28,8 @@ from ashare_quant.realtime import index_snapshot, snapshot
 
 PROJECT = Path(__file__).parent
 DISCLAIMER = "模拟研究，仅用于数据分析与学习，不构成投资建议。"
+# 账户绩效指标（年化/夏普/回撤/胜率等）至少需要这么多交易日才有统计意义
+MIN_METRIC_DAYS = 20
 
 # 模型 / 算法 / 基准的中文名称映射
 MODEL_NAMES = {
@@ -216,8 +218,9 @@ def render_realtime_valuation(decision: dict, data_dir: Path, key: str,
         r2.metric("实时总收益", f"{acc['total_return']:+.2%}")
         r3.metric("实时浮动盈亏", f"{acc['total_pnl']:+,.0f} 元")
         r4.metric("现金余额", f"{acc['cash']:,.0f} 元")
-        st.caption("按决策日收盘成本 × 快照现价逐只估值；缺失行情用本地最新收盘价兜底。"
-                   "收盘后与「账户」页一致。")
+        st.caption(f"本期持仓估值：按决策日 {decision['date']} 收盘成本 × 快照现价逐只计算，"
+                   "显示的是本期持仓（决策日至今）的收益率；缺失行情用本地最新收盘价兜底。"
+                   "「账户」页是自首个决策日以来的累计口径，两者数值不同（收盘后实时价=收盘价）。")
     except Exception as e:  # noqa: BLE001
         st.error(f"实时估值获取失败：{e}")
 
@@ -409,15 +412,34 @@ with tab_overview:
         if decision is not None else None
     account = account_snapshot(dec_view, close_panel) \
         if dec_view and close_panel is not None else None
-    if account:
+    # 累计口径（与「账户」页一致）：自首个正式决策日跟踪的净值曲线
+    history_path = data_dir / "portfolio" / "account_history.jsonl"
+    hist_all = load_history(history_path) if history_path.exists() else []
+    hist_live = [e for e in hist_all if e.get("mode") == "live"] or hist_all
+    equity_cum, _ = recompute_account(hist_live, close_panel, float(capital)) \
+        if hist_live and close_panel is not None else (pd.Series(dtype=float), {})
+    if account or not equity_cum.empty:
         st.subheader("模拟账户")
-        a1, a2, a3, a4 = st.columns(4)
-        a1.metric("初始资金", f"{account['initial']:,.0f} 元")
-        a2.metric("总资产", f"{account['total_asset']:,.0f} 元")
-        a3.metric("总收益率", f"{account['total_return']:+.2%}")
-        a4.metric("浮动盈亏", f"{account['total_pnl']:+,.0f} 元")
-        st.caption(f"按决策日 {decision['date']} 收盘买入、最新收盘价 {account['as_of']} 估值；"
-                   "（收盘价口径，每日更新后刷新；盘中实时估值见下方开关）。")
+        if not equity_cum.empty:
+            cum_asset = float(equity_cum.iloc[-1])
+            cum_ret = cum_asset / float(capital) - 1
+            cum_start = str(equity_cum.index[0].date())
+            a1, a2, a3, a4 = st.columns(4)
+            a1.metric("初始资金", f"{float(capital):,.0f} 元")
+            a2.metric("累计总资产", f"{cum_asset:,.0f} 元")
+            a3.metric("累计收益率", f"{cum_ret:+.2%}")
+            a4.metric("累计盈亏", f"{cum_asset - float(capital):+,.0f} 元")
+            st.caption(f"累计口径：自 {cum_start} 首个决策日起按收盘价逐日盯市值，"
+                       f"与「账户」页一致；截至 {equity_cum.index[-1].date()}。")
+        else:
+            a1, a2, a3, a4 = st.columns(4)
+            a1.metric("初始资金", f"{account['initial']:,.0f} 元")
+            a2.metric("本期总资产", f"{account['total_asset']:,.0f} 元")
+            a3.metric("本期收益率", f"{account['total_return']:+.2%}")
+            a4.metric("本期浮动盈亏", f"{account['total_pnl']:+,.0f} 元")
+        if account:
+            st.caption(f"本期口径：决策日 {decision['date']} 收盘建仓，自决策日收益 "
+                       f"{account['total_return']:+.2%}（刚决策当日为 0，次日开始体现）。")
         render_realtime_valuation(decision, data_dir, key="overview_rt",
                                   capital=float(capital))
     st.caption(f"每日自动更新：{auto_update_status()}（可在 start.bat 菜单 8 切换，默认开启）")
@@ -624,12 +646,11 @@ with tab_account:
     if equity_csv is None or equity_csv.empty:
         if acc_summary:
             st.info("首个正式决策已生成，账户净值曲线将于下一交易日（每日更新后）开始记录。")
-            a1, a2, a3, a4, a5 = st.columns(5)
+            a1, a2 = st.columns(2)
             a1.metric("总资产", f"{acc_summary.get('total_asset', 0.0):,.0f} 元")
             a2.metric("总收益率", f"{acc_summary.get('total_return', 0.0):+.2%}")
-            a3.metric("年化收益", format_pct_nan(acc_summary.get("annual_return", 0.0)))
-            a4.metric("夏普", f"{acc_summary.get('sharpe', 0.0):.2f}")
-            a5.metric("最大回撤", format_pct_nan(acc_summary.get("max_drawdown", 0.0)))
+            st.info(f"账户运行���足 {MIN_METRIC_DAYS} 个交易日，"
+                    "年化/夏普/回撤等绩效指标暂无统计意义，曲线成形后自动展示。")
             st.caption(f"已记录 {acc_summary.get('decisions', 0)} 次决策，"
                        f"数据截至 {acc_summary.get('as_of', '-')}。")
         else:
@@ -648,23 +669,28 @@ with tab_account:
         fig = account_figure(equity, data_dir, close_panel, view_capital)
         st.plotly_chart(fig, width="stretch")
         if len(equity) < 5:
-            st.info("账户刚刚开始记录（当前仅 1 个交易日），曲线会随每日更新逐步成形；"
+            st.info(f"账户刚开始记录（当前仅 {max(1, len(equity) - 1)} 个交易日收益），"
+                    "曲线会随每日更新逐步成形；"
                     "想看完整历史策略表现，请切换到「模拟盘」页。")
         total_asset = float(equity.iloc[-1])
         total_return = total_asset / view_capital - 1 if view_capital > 0 else 0.0
+        enough = len(equity) >= MIN_METRIC_DAYS
         a1, a2, a3, a4, a5 = st.columns(5)
         a1.metric("总资产", f"{total_asset:,.0f} 元")
         a2.metric("总收益率", f"{total_return:+.2%}")
-        a3.metric("年化收益", format_pct_nan(metrics.get("annual_return")))
-        a4.metric("夏普", f"{metrics.get('sharpe', 0.0):.2f}")
-        a5.metric("最大回撤", format_pct_nan(metrics.get("max_drawdown")))
+        a3.metric("年化收益", format_pct_nan(metrics.get("annual_return")) if enough else "—")
+        a4.metric("夏普", f"{metrics.get('sharpe', 0.0):.2f}" if enough else "—")
+        a5.metric("最大回撤", format_pct_nan(metrics.get("max_drawdown")) if enough else "—")
         b1, b2, b3, b4 = st.columns(4)
-        b1.metric("胜率", format_pct_nan(metrics.get("win_rate")))
-        b2.metric("盈亏比", f"{metrics.get('profit_loss_ratio', float('nan')):.2f}"
-                   if not pd.isna(metrics.get("profit_loss_ratio", float("nan"))) else "—")
-        b3.metric("年化波动", format_pct_nan(metrics.get("annual_vol")))
-        b4.metric("Calmar", f"{metrics.get('calmar', float('nan')):.2f}"
-                   if not pd.isna(metrics.get("calmar", float("nan"))) else "—")
+        b1.metric("胜率", format_pct_nan(metrics.get("win_rate")) if enough else "—")
+        plr = metrics.get("profit_loss_ratio", float("nan"))
+        b2.metric("盈亏比", f"{plr:.2f}" if enough and not pd.isna(plr) else "—")
+        b3.metric("年化波动", format_pct_nan(metrics.get("annual_vol")) if enough else "—")
+        calmar = metrics.get("calmar", float("nan"))
+        b4.metric("Calmar", f"{calmar:.2f}" if enough and not pd.isna(calmar) else "—")
+        if not enough:
+            st.info(f"账户运行仅 {len(equity)} 个净值点（不足 {MIN_METRIC_DAYS} 天），"
+                    "年化/夏普/回撤/胜率等指标暂无统计意义，曲线成形后自动展示。")
         decisions_n = (acc_summary or {}).get("decisions", len(hist_view))
         as_of = (acc_summary or {}).get("as_of", str(equity.index[-1].date()))
         st.caption(f"已记录 {decisions_n} 次决策，数据截至 {as_of}；"
@@ -779,8 +805,10 @@ with tab_realtime:
                         r2.metric("实时总收益", f"{acc_realtime['total_return']:+.2%}")
                         r3.metric("实时浮动盈亏", f"{acc_realtime['total_pnl']:+,.0f} 元")
                         r4.metric("现金余额", f"{acc_realtime['cash']:,.0f} 元")
-                        st.caption("按决策日收盘成本 × 实时现价逐只估值；停牌/未取到行情"
-                                   "的股票用本地最新收盘价兜底。收盘后与「账户」页一致。")
+                        st.caption(f"本期持仓估值：按决策日 {decision['date']} 收盘成本 × "
+                                   "实时现价逐只计算（自决策日收益）；停牌/未取到行情"
+                                   "的股票用本地最新收盘价兜底。「账户」页是自首个决策日"
+                                   "以来的累计口径，两者数值不同。")
                         # 每只股票实时收益列（数值版，先于下方格式化）
                         rows_r = acc_realtime["rows"].rename(columns={
                             "现价": "实时价", "市值": "持仓市值",
