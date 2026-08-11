@@ -55,6 +55,17 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
   成本=现价、本期收益恒为 0），与账户页累计净值（98,599）对不上。账户页/
   总览/实时行情三处口径统一：实时总收益=总资产/初始资金-1（累计），
   本期浮动盈亏=现价相对决策日成本；绩效指标不足 20 个交易日不展示。
+- **每日决策模型池由 `config.yaml` 的 `models` 字段控制**（2026-08-11 起）：
+  空列表回退默认 6 模型。当前池 = lgbm/xgb/rank_lgb/huber_lgb/risk_aware_lgb/
+  temporal_decay_lgb；换池必须 `daily --retrain`。
+- **决策排序用"截面排名均值融合"**（`ml/decision.py`）：各模型预测转当日
+  横截面百分位排名再平均，量纲无关（rank_lgb 分数可安全参与）；`score`
+  列是各模型预测的**中位数**（展示用），不是排序依据。改排序逻辑必须
+  重跑 `daily --force` 并检查报告里的预期收益量纲是否合理。
+- 自研模型基准（全市场 walk-forward，2026-08-11）：risk_aware_lgb 夏普
+  2.81 最高、rank_lgb IC 0.097/回撤 -3.6% 最优、huber_lgb 年化 78.5% 最高、
+  rank_ensemble 融合年化 77.9%；rank_xgb（IC 0.01）与 mlp_deep 已排除。
+  TabPFN v2 需 HF 登录（gated），暂不可用。
 - 决策文件多目录兼容：仪表盘读日期最新的一份（`load_decision`），
   计划任务历史可能写 `docs/simulation`。
 - **盘中抓取的当日 bar 不是收盘价**：10:35/11:2x 拉取会把 08-11 盘中价

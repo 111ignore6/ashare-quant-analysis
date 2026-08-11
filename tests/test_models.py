@@ -36,16 +36,19 @@ def test_modern_models_registered_and_rankable():
     """新模型（XGBoost / LGBMRanker 排序包装）可构造、可拟合、可预测。"""
     from ashare_quant.ml.models import MODELS, list_models
 
-    for name in ("xgb", "rank_lgb"):
+    new_models = ("xgb", "rank_lgb", "rank_xgb", "mlp_deep", "pls", "enet",
+                  "huber_lgb", "temporal_decay_lgb", "risk_aware_lgb")
+    for name in new_models:
         assert name in list_models()
         factory = MODELS[name]
         model = factory()
         idx = pd.MultiIndex.from_product(
-            [pd.to_datetime(["2023-01-02", "2023-01-03", "2023-01-04"]),
-             ["A", "B", "C"]], names=["date", "symbol"])
-        X = pd.DataFrame(np.random.default_rng(0).normal(size=(9, 4)),
+            [pd.to_datetime(["2023-01-02", "2023-01-03", "2023-01-04",
+                             "2023-01-05", "2023-01-06", "2023-01-09"]),
+             ["A", "B", "C", "D", "E", "F", "G", "H"]], names=["date", "symbol"])
+        X = pd.DataFrame(np.random.default_rng(0).normal(size=(len(idx), 4)),
                          index=idx, columns=list("abcd"))
-        y = pd.Series(np.random.default_rng(1).normal(size=9), index=idx)
+        y = pd.Series(np.random.default_rng(1).normal(size=len(idx)), index=idx)
         model.fit(X, y)
         pred = model.predict(X)
         assert len(pred) == len(X)

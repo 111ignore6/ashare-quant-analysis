@@ -15,6 +15,8 @@ class Config:
     fallback_sources: tuple[str, ...] = ("tencent", "akshare")
     years: int = 3
     adjust: str = "qfq"
+    # 每日决策模型池；空列表 = 默认 6 模型（lgbm/histgb/rf/svm/knn/linear）
+    models: tuple[str, ...] = ()
     max_workers: int = 8
     retry: int = 3
     rate_limit_per_second: float = 2.0

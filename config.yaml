@@ -13,3 +13,10 @@ initial_capital: 100000.0
 stop_loss: -0.15
 take_profit: 0.3
 auto_update: true
+models:
+- lgbm
+- xgb
+- rank_lgb
+- huber_lgb
+- risk_aware_lgb
+- temporal_decay_lgb

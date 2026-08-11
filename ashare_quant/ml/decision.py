@@ -65,7 +65,13 @@ def load_models(out_dir: Path) -> dict:
 
 def decide(models: dict, X: pd.DataFrame, close: pd.DataFrame,
            date, top_n: int = 50) -> pd.DataFrame:
-    """在指定日期用已训练模型打分 → 置信度软加权 → 选 Top-N（等权）。"""
+    """在指定日期用已训练模型打分 → 截面排名均值融合 → 选 Top-N（等权）。
+
+    排名融合：每个模型预测转当日横截面百分位排名（0-1）再平均。不同模型的
+    量纲/极端值不再干扰融合，直接对齐 Top-N 选股目标（rank_ensemble 在全
+    市场 benchmark 中年化 77.9%）。`score` 列保留原始预测均值（未来 20 日
+    收益预期，供展示），排序以 `rank_score` 为准。
+    """
     rows = X[X.index.get_level_values("date") == pd.Timestamp(date)]
     if rows.empty:
         raise ValueError(f"日期 {date} 无特征数据")
@@ -74,15 +80,16 @@ def decide(models: dict, X: pd.DataFrame, close: pd.DataFrame,
     preds = pd.DataFrame({name: m.predict(rows) for name, m in models["models"].items()},
                          index=rows.index)
     model_names = list(preds.columns)
-    mean_pred = preds.mean(axis=1)
-    threshold = np.mean(list(models["meta"]["thresholds"].values()))
-    if threshold > 0:
-        conf = (mean_pred.abs() / threshold).clip(upper=1.0)
-        score = mean_pred * conf
-    else:
-        score = mean_pred
-    table = pd.DataFrame({"symbol": score.index.get_level_values("symbol"),
-                          "score": score.values}).sort_values("score", ascending=False)
+    ranks = preds.groupby(level="date").rank(pct=True)
+    rank_score = ranks.mean(axis=1)
+    # 展示用"预期收益"：取各模型预测的中位数（对量纲差异稳健，
+    # 排序/选股仍以 rank_score 为准）
+    display_pred = np.median(preds.to_numpy(), axis=1)
+    table = pd.DataFrame({
+        "symbol": rank_score.index.get_level_values("symbol"),
+        "rank_score": rank_score.values,
+        "score": display_pred,
+    }).sort_values(["rank_score", "score"], ascending=False)
     picks = table.head(top_n).copy()
     # 决策解释：记录每只股票的各模型预测明细
     picks["model_scores"] = [

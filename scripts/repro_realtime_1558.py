@@ -84,9 +84,9 @@ def main() -> None:
           f"{total_return:+.4%}")
 
     # 3) 对照：账户页 08-10 决策 × 旧面板 08-11 盘中价（= 日志 -0.16%）
-    hist = [json.loads(l) for l in
+    hist = [json.loads(line) for line in
             (ROOT / "data" / "tencent" / "portfolio" / "account_history.jsonl")
-            .read_text(encoding="utf-8").splitlines() if l.strip()]
+            .read_text(encoding="utf-8").splitlines() if line.strip()]
     dec810 = next(d for d in hist if d.get("date") == "2026-08-10")
     s10 = [p["symbol"] for p in dec810["picks"]]
     c10 = pd.Series({c: old_row(c, "2026-08-10") for c in s10}, dtype=float)

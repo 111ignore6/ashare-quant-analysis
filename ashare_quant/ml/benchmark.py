@@ -88,6 +88,72 @@ def rank_ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
     return pd.concat(all_rets)
 
 
+def _fit_members(X: pd.DataFrame, y: pd.Series, tr_dates, members, sample_size: int):
+    mask = X.index.get_level_values("date").isin(tr_dates)
+    idx = np.flatnonzero(mask)
+    if len(idx) > sample_size:
+        idx = np.random.default_rng(0).choice(idx, sample_size, replace=False)
+    return [MODELS[name]().fit(X.iloc[idx], y.iloc[idx]) for name in members]
+
+
+def agreement_ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
+                               folds, top_n: int = 50, sample_size: int = 40000,
+                               members=("lgbm", "histgb", "rf", "xgb", "rank_lgb"),
+                               penalty: float = 0.5) -> pd.Series:
+    """自研：一致性排序融合——成员排名均值扣减"排名离散度×惩罚"。
+
+    成员分歧大的股票（某几个模型看多、某几个看空）往往噪音更大，
+    显式降权，保留高共识股票进 Top-N。
+    """
+    all_rets = []
+    for tr_dates, va_dates in folds:
+        fitted = _fit_members(X, y, tr_dates, members, sample_size)
+        rdates = monthly_rebalance_dates(va_dates)
+        rows = X[X.index.get_level_values("date").isin(rdates)]
+        ranks = []
+        for m in fitted:
+            pred = pd.Series(m.predict(rows), index=rows.index)
+            ranks.append(pred.groupby(level="date").rank(pct=True))
+        rank_df = pd.concat(ranks, axis=1)
+        score = (rank_df.mean(axis=1) - penalty * rank_df.std(axis=1)
+                 ).unstack("symbol")
+        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n))
+    return pd.concat(all_rets)
+
+
+def ic_rank_ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
+                             folds, top_n: int = 50, sample_size: int = 40000,
+                             members=("lgbm", "histgb", "rf", "xgb", "rank_lgb"),
+                             tail_months: int = 6) -> pd.Series:
+    """自研：滚动 IC 加权排序融合——成员近期截面 IC 越高权重越大。"""
+    all_rets = []
+    for tr_dates, va_dates in folds:
+        fitted = _fit_members(X, y, tr_dates, members, sample_size)
+        # 训练段尾部（最近 tail_months）的成员 IC 作为权重
+        tail = sorted(tr_dates)[-int(21 * tail_months):]
+        tail_rows = X[X.index.get_level_values("date").isin(tail)]
+        weights = []
+        for m in fitted:
+            pred = pd.Series(m.predict(tail_rows), index=tail_rows.index)
+            pw = pred.unstack("symbol")
+            aw = y[tail_rows.index].unstack("symbol")
+            ic = pw.corrwith(aw, axis=1).dropna()
+            weights.append(max(0.0, float(ic.mean())))
+        total = sum(weights)
+        w = np.asarray(weights, dtype=float) / total if total > 0 \
+            else np.ones(len(members)) / len(members)
+        rdates = monthly_rebalance_dates(va_dates)
+        rows = X[X.index.get_level_values("date").isin(rdates)]
+        ranks = []
+        for m in fitted:
+            pred = pd.Series(m.predict(rows), index=rows.index)
+            ranks.append(pred.groupby(level="date").rank(pct=True))
+        rank_df = pd.concat(ranks, axis=1)
+        score = (rank_df * w).sum(axis=1).unstack("symbol")
+        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n))
+    return pd.concat(all_rets)
+
+
 def _conformal_threshold(model, X: pd.DataFrame, y: pd.Series, calib_dates, alpha: float) -> float:
     rows = X[X.index.get_level_values("date").isin(calib_dates)]
     if len(rows) == 0:
@@ -237,6 +303,16 @@ def run_benchmark(close: pd.DataFrame, volume: pd.DataFrame, index_close: pd.Ser
                                      sample_size=sample_size)
     rows.append(_metrics_row("rank_ensemble", rank_ens))
     series["rank_ensemble"] = rank_ens
+
+    agr = agreement_ensemble_returns(X, y, close, folds, top_n=top_n,
+                                     sample_size=sample_size)
+    rows.append(_metrics_row("agreement_ensemble", agr))
+    series["agreement_ensemble"] = agr
+
+    icr = ic_rank_ensemble_returns(X, y, close, folds, top_n=top_n,
+                                   sample_size=sample_size)
+    rows.append(_metrics_row("ic_rank_ensemble", icr))
+    series["ic_rank_ensemble"] = icr
 
     conf = conformal_returns(MODELS["lgbm"], X, y, close, folds, top_n=top_n,
                              sample_size=sample_size, alpha=0.5)

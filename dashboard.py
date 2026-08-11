@@ -47,7 +47,16 @@ MODEL_NAMES = {
     "lgbm": "LightGBM",
     "xgb": "XGBoost",
     "rank_lgb": "LightGBM排序(LambdaRank)",
+    "rank_xgb": "XGBoost排序(pairwise)",
     "rank_ensemble": "排序融合(截面排名均值)",
+    "agreement_ensemble": "一致性排序融合",
+    "ic_rank_ensemble": "IC加权排序融合",
+    "temporal_decay_lgb": "LGBM时间衰减",
+    "risk_aware_lgb": "LGBM风险调整",
+    "huber_lgb": "LightGBM(Huber)",
+    "mlp_deep": "神经网络MLP(深层)",
+    "pls": "偏最小二乘PLS",
+    "enet": "弹性网ElasticNet",
     "histgb": "梯度提升(HistGB)",
     "svm": "支持向量机",
     "knn": "K近邻",
@@ -503,7 +512,8 @@ with tab_overview:
         st.dataframe(picks, width="stretch")
         st.caption(f"决策日期 {decision['date']}，模型："
                    f"{'、'.join(display_name(m) for m in decision['models'])}。"
-                   "预期收益为多模型预测的未来 20 个交易日收益均值。")
+                   "选股按各模型预测的当日截面排名均值排序（rank 融合），"
+                   "「预期收益」为各模型预测的中位数（展示用）。")
     else:
         st.info("暂无决策结果，运行「每日更新」后生成。")
 
@@ -552,7 +562,8 @@ with tab_decision:
             picks["权重"] = picks["权重"].map(
                 lambda v: f"{v:.1%}" if pd.notna(v) else "-")
         st.dataframe(picks, width="stretch")
-        st.caption("预期收益为多模型预测的未来 20 个交易日收益均值，模拟研究仅供学习。")
+        st.caption("选股按各模型预测的当日截面排名均值排序（rank 融合）；"
+                   "「预期收益」为各模型预测的中位数（展示用），模拟研究仅供学习。")
         if account:
             st.subheader("账户持仓明细")
             pos = account["rows"].copy()
@@ -566,9 +577,11 @@ with tab_decision:
             pos["盈亏率"] = pos["盈亏率"].map(lambda v: f"{v:+.2%}")
             st.dataframe(pos, width="stretch")
         with st.expander("模型预测明细（为什么选这些股票）"):
-            st.caption("每只股票在 LGBM / 梯度提升 / 随机森林 / SVM / KNN / "
-                       "线性回归六个模型下的未来 20 日预期收益，"
-                       "最终得分为多模型均值经置信度加权。")
+            model_names_txt = "、".join(
+                display_name(m) for m in decision.get("models", []))
+            st.caption(f"每只股票在 {model_names_txt} 下的未来 20 日预测；"
+                       "排序用各模型预测的当日截面排名均值（rank 融合），"
+                       "「加权得分」为预测中位数（展示用）。")
             detail = pd.DataFrame(decision["picks"]).copy()
             if "model_scores" in detail.columns and detail["model_scores"].notna().any():
                 scores = pd.json_normalize(detail["model_scores"].dropna().tolist())

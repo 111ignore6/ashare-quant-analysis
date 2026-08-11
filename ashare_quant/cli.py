@@ -376,7 +376,10 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
         if (pd.Timestamp.today().normalize() - trained).days > 30:
             need_retrain = True
     if need_retrain:
-        train_and_save(X, y, model_dir, sample_size=sample_size,
+        model_names = list(cfg.models) if cfg.models else \
+            ("lgbm", "histgb", "rf", "svm", "knn", "linear")
+        train_and_save(X, y, model_dir, model_names=model_names,
+                       sample_size=sample_size,
                        as_of=close.index.max())
     loaded = load_models(model_dir)
     last_date = X_all.index.get_level_values("date").max()

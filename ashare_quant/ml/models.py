@@ -119,6 +119,151 @@ def rank_lgb():
     return _LGBMRankerWrapper()
 
 
+class _XGBRankerWrapper:
+    """XGBoost ranker（pairwise）：与 rank_lgb 同思路，排序目标异构补充。"""
+
+    def __init__(self, **kwargs) -> None:
+        self._kw = dict(n_estimators=300, learning_rate=0.05, max_depth=6,
+                        n_jobs=-1, random_state=0, verbosity=0)
+        self._kw.update(kwargs)
+        self.model = None
+
+    def fit(self, X, y, **fit_kwargs):
+        from xgboost import XGBRanker
+        dates = X.index.get_level_values("date")
+        order = np.argsort(dates.to_numpy(), kind="stable")
+        Xs = X.iloc[order]
+        ys = y.iloc[order]
+        ds = dates[order]
+        groups = ds.value_counts().sort_index().to_numpy()
+        label = (ys.groupby(level="date").rank(pct=True) * 9).round().astype(int)
+        self.model = XGBRanker(**self._kw)
+        self.model.fit(Xs, label, group=groups, **fit_kwargs)
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+
+@register_model()
+def rank_xgb():
+    """XGBoost 排序（pairwise），按日期分组优化横截面排名。"""
+    return _XGBRankerWrapper()
+
+
+@register_model()
+def mlp_deep():
+    """更深 MLP（带早停）：捕捉特征非线性交互，比默认 (64,32) 更强。"""
+    return MLPRegressor(hidden_layer_sizes=(128, 64, 32), max_iter=500,
+                        early_stopping=True, n_iter_no_change=20,
+                        random_state=0)
+
+
+class _PLS:
+    """偏最小二乘（Gu-Kelly-Xiu 大样本计量）：成分数自适应特征数。"""
+
+    def __init__(self, n_components: int = 8) -> None:
+        self.n_components = n_components
+        self.model = None
+
+    def fit(self, X, y, **fit_kwargs):
+        from sklearn.cross_decomposition import PLSRegression
+        k = min(self.n_components, X.shape[1], max(1, X.shape[0] - 1))
+        self.model = PLSRegression(n_components=k)
+        self.model.fit(X, y, **fit_kwargs)
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+
+@register_model()
+def pls():
+    """偏最小二乘（Gu-Kelly-Xiu 大样本计量）：从特征中提取主成分预测。"""
+    return _PLS()
+
+
+@register_model()
+def enet():
+    """弹性网：稀疏线性 + 岭，特征多时比 Ridge 更稳。"""
+    from sklearn.linear_model import ElasticNet
+    return ElasticNet(alpha=1e-3, l1_ratio=0.5, random_state=0)
+
+
+@register_model()
+def huber_lgb():
+    """LGBM + Huber 损失：对收益厚尾/异常值更稳健。"""
+    from lightgbm import LGBMRegressor
+    return LGBMRegressor(n_estimators=300, learning_rate=0.05, num_leaves=31,
+                         objective="huber", n_jobs=-1, random_state=0, verbose=-1)
+
+
+class _TemporalDecayLGB:
+    """自研：时间衰减 LGBM——近期样本权重更高，适应市场状态漂移。
+
+    权重 = exp(-天数 / 365)，约一年前样本权重降到 37%，半衰期一年。
+    """
+
+    def __init__(self, half_life_days: int = 365, **kwargs) -> None:
+        self._half = half_life_days
+        self._kw = dict(n_estimators=300, learning_rate=0.05, num_leaves=31,
+                        n_jobs=-1, random_state=0, verbose=-1)
+        self._kw.update(kwargs)
+        self.model = None
+
+    def fit(self, X, y, **fit_kwargs):
+        from lightgbm import LGBMRegressor
+        dates = X.index.get_level_values("date")
+        age = (dates.max() - dates).days.to_numpy(dtype=float)
+        w = np.exp(-np.log(2) * age / self._half)
+        self.model = LGBMRegressor(**self._kw)
+        self.model.fit(X, y, sample_weight=w, **fit_kwargs)
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+
+@register_model()
+def temporal_decay_lgb():
+    """自研：时间衰减 LGBM（近期样本加权，半衰期一年）。"""
+    return _TemporalDecayLGB()
+
+
+class _RiskAwareLGB:
+    """自研：风险调整 LGBM——双头模型。
+
+    头1 预测未来收益，头2 预测未来收益绝对值（风险代理）；
+    打分 = 预期收益 / (1 + 预期风险)，选"单位风险收益高"的股票。
+    """
+
+    def __init__(self, **kwargs) -> None:
+        self._kw = dict(n_estimators=300, learning_rate=0.05, num_leaves=31,
+                        n_jobs=-1, random_state=0, verbose=-1)
+        self._kw.update(kwargs)
+        self.ret_model = None
+        self.risk_model = None
+
+    def fit(self, X, y, **fit_kwargs):
+        from lightgbm import LGBMRegressor
+        self.ret_model = LGBMRegressor(**self._kw)
+        self.ret_model.fit(X, y, **fit_kwargs)
+        self.risk_model = LGBMRegressor(**self._kw)
+        self.risk_model.fit(X, y.abs(), **fit_kwargs)
+        return self
+
+    def predict(self, X):
+        ret = self.ret_model.predict(X)
+        risk = self.risk_model.predict(X)
+        return ret / (1.0 + np.maximum(risk, 0.0))
+
+
+@register_model()
+def risk_aware_lgb():
+    """自研：风险调整 LGBM（收益头 ÷ (1+风险头)）。"""
+    return _RiskAwareLGB()
+
+
 @register_model()
 def histgb() -> HistGradientBoostingRegressor:
     return HistGradientBoostingRegressor(max_iter=300, max_depth=6,

@@ -83,3 +83,46 @@
 
 > 注意：以上为研究评测，**每日实盘决策仍用原 6 模型**（lgbm/histgb/rf/svm/
 > knn/linear）；是否把新模型纳入正式决策待你确认后执行。
+
+## 第二轮：自研模型批量落地 + 实盘切换（2026-08-11 晚）
+
+### 新增模型（全市场 walk-forward 复测）
+
+| 模型 | 年化 | 夏普 | 最大回撤 | 胜率 | 平均IC | 说明 |
+|---|---|---|---|---|---|---|
+| **risk_aware_lgb（自研）** | 66.7% | **2.81** | -8.3% | 86.7% | 0.096 | 双头模型：收益÷(1+风险)，夏普全场 ML 最高 |
+| xgb | 57.1% | 2.55 | -7.0% | 80% | 0.087 | 集成多样性 |
+| rank_lgb（LambdaRank） | 57.1% | 2.47 | **-3.6%** | 80% | **0.097** | IC 最高、回撤最低 |
+| temporal_decay_lgb（自研） | 62.4% | 2.42 | -8.8% | 80% | 0.092 | 时间衰减加权，适应状态漂移 |
+| huber_lgb | **78.5%** | 2.34 | -6.6% | 73.3% | 0.095 | Huber 损失，年化 ML 最高 |
+| rank_ensemble（自研融合） | 77.9% | 2.36 | -8.6% | 86.7% | - | 截面排名均值融合 |
+| agreement_ensemble（自研） | 74.9% | 2.23 | -7.8% | 80% | - | 排名均值−分歧惩罚 |
+| ic_rank_ensemble（自研） | 72.5% | 2.23 | -9.3% | 86.7% | - | 滚动 IC 加权排名融合 |
+| rank_xgb | 64.6% | 1.69 | -11.4% | 73.3% | 0.010 | XGB pairwise 排序效果差，已排除 |
+| mlp_deep / pls / enet | ≤1.06 夏普 | | | | | 数据量下深网/线性类不敌树模型 |
+| lgbm（旧主力） | 65.9% | 2.75 | -8.0% | 86.7% | 0.096 | 保留 |
+
+### 已切换实盘（config.yaml `models` 字段，新字段）
+
+```yaml
+models: [lgbm, xgb, rank_lgb, huber_lgb, risk_aware_lgb, temporal_decay_lgb]
+```
+
+- **决策引擎升级为"截面排名均值融合"**（`ml/decision.py`）：每个模型预测转
+  当日横截面百分位排名再平均，量纲无关，rank_lgb 可安全参与；`score` 列
+  改为各模型预测**中位数**（展示用），避免 rank 分数量纲污染"预期收益"。
+- 已重训并生成 08-11 新决策（models 6 个，50 只）；账户累计仍 -1.40%
+  （08-11 收盘口径，新持仓自明日开始体现收益）。
+- 旧 6 模型（svm/knn/linear/mlp/histgb/rf 中的弱项）退出实盘但保留注册表，
+  可在 `算法对比` 页继续查看。
+
+### TabPFN v2：受阻
+
+已安装，但 v2（tabpfn_3）是 HuggingFace **gated 模型**，需要
+[接受许可](https://huggingface.co/Prior-Labs/tabpfn_3) + `hf auth login`
+后才能下载权重。CPU 上 4 万样本推理也很慢。→ 需用户登录 HF 后另行评估。
+
+### 深度时序（AlphaNet/iTransformer/PatchTST/TRA）
+
+benchmark 已有 `--with-dl` 的 GRU 骨架（CPU 全市场偏慢）；iTransformer/
+PatchTST 需按 symbol×time×feature 张量化重构，列为下一阶段（路线图不变）。
