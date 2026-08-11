@@ -472,6 +472,9 @@ with tab_overview:
 with tab_sim:
     st.subheader("模拟盘对比（月度调仓 Top-50，含交易成本）")
     st.caption("虚线为真实市场基准：等权全市场与沪深300 指数买入持有。")
+    st.caption("说明：此处为早期 5 个基础策略（动量/反转/低波/多因子/轮动）的月度调仓回测，"
+               "收益按调仓月标记（如 07-01 段已含最新交易日数据）；"
+               "当前每日决策使用的是 6 个 ML 模型，其样本外表现请见「算法对比」页。")
     risk_cfg = yaml.safe_load((PROJECT / "config.yaml").read_text(encoding="utf-8")) \
         if (PROJECT / "config.yaml").exists() else None
     if risk_cfg and (risk_cfg.get("stop_loss") is not None or risk_cfg.get("take_profit") is not None):
