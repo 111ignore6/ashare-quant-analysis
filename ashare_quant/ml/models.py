@@ -3,6 +3,8 @@ from __future__ import annotations
 from importlib.metadata import entry_points
 from typing import Callable
 
+import numpy as np
+
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.neighbors import KNeighborsRegressor
@@ -68,6 +70,53 @@ def lgbm():
     from lightgbm import LGBMRegressor
     return LGBMRegressor(n_estimators=300, learning_rate=0.05, num_leaves=31,
                          n_jobs=-1, random_state=0, verbose=-1)
+
+
+@register_model()
+def xgb():
+    """XGBoost：与 LGBM/HistGB 同族不同实现，给集成加多样性。"""
+    from xgboost import XGBRegressor
+    return XGBRegressor(n_estimators=300, learning_rate=0.05, max_depth=6,
+                        n_jobs=-1, random_state=0, verbosity=0)
+
+
+class _LGBMRankerWrapper:
+    """LGBMRanker（LambdaRank）：直接优化横截面排序（按日期分组）。
+
+    我们的任务是"预测未来 20 日收益后排序选 Top-N"，MSE 回归对排序
+    是代理目标；LGBMRanker 用 pairwise 排序损失直接对齐任务目标，
+    walk-forward 评测中每折独立 fit（无需 sklearn clone）。
+    """
+
+    def __init__(self, **kwargs) -> None:
+        self._kw = dict(n_estimators=300, learning_rate=0.05, num_leaves=31,
+                        n_jobs=-1, random_state=0, verbose=-1,
+                        label_gain=list(range(10)))
+        self._kw.update(kwargs)
+        self.model = None
+
+    def fit(self, X, y, **fit_kwargs):
+        from lightgbm import LGBMRanker
+        dates = X.index.get_level_values("date")
+        order = np.argsort(dates.to_numpy(), kind="stable")
+        Xs = X.iloc[order]
+        ys = y.iloc[order]
+        ds = dates[order]
+        groups = ds.value_counts().sort_index().to_numpy()
+        # LambdaRank 需要整数 relevance：把连续收益转成"日期内十分位"（0-9）
+        label = (ys.groupby(level="date").rank(pct=True) * 9).round().astype(int)
+        self.model = LGBMRanker(**self._kw)
+        self.model.fit(Xs, label, group=groups, **fit_kwargs)
+        return self
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+
+@register_model()
+def rank_lgb():
+    """LightGBM 排序（LambdaRank），按日期分组优化横截面排名。"""
+    return _LGBMRankerWrapper()
 
 
 @register_model()

@@ -30,3 +30,23 @@ def test_reversal_scores_oversold_higher():
     last = score.iloc[-1].dropna()
     worst = close.pct_change(20, fill_method=None).iloc[-1].idxmin()
     assert last.idxmax() == worst
+
+
+def test_modern_models_registered_and_rankable():
+    """新模型（XGBoost / LGBMRanker 排序包装）可构造、可拟合、可预测。"""
+    from ashare_quant.ml.models import MODELS, list_models
+
+    for name in ("xgb", "rank_lgb"):
+        assert name in list_models()
+        factory = MODELS[name]
+        model = factory()
+        idx = pd.MultiIndex.from_product(
+            [pd.to_datetime(["2023-01-02", "2023-01-03", "2023-01-04"]),
+             ["A", "B", "C"]], names=["date", "symbol"])
+        X = pd.DataFrame(np.random.default_rng(0).normal(size=(9, 4)),
+                         index=idx, columns=list("abcd"))
+        y = pd.Series(np.random.default_rng(1).normal(size=9), index=idx)
+        model.fit(X, y)
+        pred = model.predict(X)
+        assert len(pred) == len(X)
+        assert np.isfinite(pred).all()

@@ -58,6 +58,36 @@ def ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
     return pd.concat(all_rets)
 
 
+def rank_ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
+                          folds, top_n: int = 50, sample_size: int = 40000,
+                          members=("lgbm", "histgb", "rf", "xgb", "rank_lgb")) -> pd.Series:
+    """自定义融合：多模型预测转横截面百分位排名后取均值（rank aggregation）。
+
+    直接对原始预测取均值会被个别模型的量纲/极端值带偏；转截面排名后再平均，
+    每个模型只贡献"相对位置"，与 Top-N 选股目标对��，天然稳健。
+    """
+    all_rets = []
+    for tr_dates, va_dates in folds:
+        mask = X.index.get_level_values("date").isin(tr_dates)
+        idx = np.flatnonzero(mask)
+        if len(idx) > sample_size:
+            idx = np.random.default_rng(0).choice(idx, sample_size, replace=False)
+        fitted = []
+        for name in members:
+            model = MODELS[name]()
+            model.fit(X.iloc[idx], y.iloc[idx])
+            fitted.append(model)
+        rdates = monthly_rebalance_dates(va_dates)
+        rows = X[X.index.get_level_values("date").isin(rdates)]
+        ranks = []
+        for m in fitted:
+            pred = pd.Series(m.predict(rows), index=rows.index)
+            ranks.append(pred.groupby(level="date").rank(pct=True))
+        score = pd.concat(ranks, axis=1).mean(axis=1).unstack("symbol")
+        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n))
+    return pd.concat(all_rets)
+
+
 def _conformal_threshold(model, X: pd.DataFrame, y: pd.Series, calib_dates, alpha: float) -> float:
     rows = X[X.index.get_level_values("date").isin(calib_dates)]
     if len(rows) == 0:
@@ -202,6 +232,11 @@ def run_benchmark(close: pd.DataFrame, volume: pd.DataFrame, index_close: pd.Ser
     ens = ensemble_returns(X, y, close, folds, top_n=top_n, sample_size=sample_size)
     rows.append(_metrics_row("ensemble(lgbm+histgb+rf)", ens))
     series["ensemble"] = ens
+
+    rank_ens = rank_ensemble_returns(X, y, close, folds, top_n=top_n,
+                                     sample_size=sample_size)
+    rows.append(_metrics_row("rank_ensemble", rank_ens))
+    series["rank_ensemble"] = rank_ens
 
     conf = conformal_returns(MODELS["lgbm"], X, y, close, folds, top_n=top_n,
                              sample_size=sample_size, alpha=0.5)
