@@ -132,6 +132,12 @@ def load_panel_close(data_dir: Path):
     return pd.read_parquet(p)
 
 
+@st.cache_data(ttl=5)
+def _cached_snapshot(symbols: tuple) -> pd.DataFrame:
+    """同一页面运行内共享同一份快照（5 秒 TTL），避免多处显示不一致。"""
+    return snapshot(list(symbols))
+
+
 @st.cache_data(ttl=600)
 def load_symbol(data_dir: Path, code: str):
     """读取单只股票本地日线（K线详情用，秒级）。"""
@@ -173,26 +179,29 @@ def format_pct_nan(v) -> str:
     return "—" if pd.isna(v) else f"{v:+.2%}"
 
 
-def render_realtime_valuation(decision: dict, data_dir: Path, key: str) -> None:
+def render_realtime_valuation(decision: dict, data_dir: Path, key: str,
+                              capital: float | None = None) -> None:
     """盘中实时估值（快照价）：开关开启才拉行情，避免每次刷新变慢。"""
     if decision is None or not decision.get("picks"):
         return
     if not st.toggle("盘中实时估值（快照价，秒级）", value=False, key=key):
         return
     try:
-        snap = snapshot([p["symbol"] for p in decision["picks"]])
+        pick_syms = [p["symbol"] for p in decision["picks"]]
+        snap = _cached_snapshot(tuple(pick_syms))
         if snap.empty:
             st.warning("未获取到实时行情（可能非交易时段或接口限流）。")
             return
         close_panel = load_panel_close(data_dir)
         d0 = pd.Timestamp(decision["date"])
-        pick_syms = [p["symbol"] for p in decision["picks"]]
         prices = snap.set_index("代码")["现价"].astype(float)
         fallback = close_panel.iloc[-1].reindex(pick_syms)
         if close_panel is not None and d0 in close_panel.index:
             fallback = fallback.fillna(close_panel.loc[d0, pick_syms])
         prices = prices.reindex(fallback.index).fillna(fallback)
-        acc = account_snapshot(decision, close_panel, prices=prices)
+        dec_view = {**decision, "initial_capital": float(capital)} \
+            if capital is not None else decision
+        acc = account_snapshot(dec_view, close_panel, prices=prices)
         if acc is None:
             st.warning("无法按实时价估值（缺少决策日基准）。")
             return
@@ -390,8 +399,10 @@ with tab_overview:
     c4.metric("今日持仓", f"{len(decision['picks'])} 只" if decision else "—")
 
     close_panel = load_panel_close(data_dir)
-    account = account_snapshot(decision, close_panel) \
-        if decision and close_panel is not None else None
+    dec_view = {**decision, "initial_capital": float(capital)} \
+        if decision is not None else None
+    account = account_snapshot(dec_view, close_panel) \
+        if dec_view and close_panel is not None else None
     if account:
         st.subheader("模拟账户")
         a1, a2, a3, a4 = st.columns(4)
@@ -401,7 +412,8 @@ with tab_overview:
         a4.metric("浮动盈亏", f"{account['total_pnl']:+,.0f} 元")
         st.caption(f"按决策日 {decision['date']} 收盘买入、最新收盘价 {account['as_of']} 估值；"
                    "（收盘价口径，每日更新后刷新；盘中实时估值见下方开关）。")
-        render_realtime_valuation(decision, data_dir, key="overview_rt")
+        render_realtime_valuation(decision, data_dir, key="overview_rt",
+                                  capital=float(capital))
     st.caption(f"每日自动更新：{auto_update_status()}（可在 start.bat 菜单 8 切换，默认开启）")
 
     if not manifest:
@@ -563,7 +575,8 @@ with tab_account:
                "决策每日收盘后生成，收益随每日更新持续累积。"
                "曲线为收盘价口径（每日更新后刷新）；盘中实时估值见下方开关。"
                "历史策略表现请参考「模拟盘」页。")
-    render_realtime_valuation(decision, data_dir, key="account_rt")
+    render_realtime_valuation(decision, data_dir, key="account_rt",
+                              capital=float(capital))
     equity_csv = load_csv(data_dir / "portfolio" / "account_equity.csv")
     acc_summary = load_json(data_dir / "portfolio" / "account_summary.json")
     history_path = data_dir / "portfolio" / "account_history.jsonl"
@@ -695,7 +708,7 @@ with tab_realtime:
     else:
         symbols = [p["symbol"] for p in decision["picks"]]
         try:
-            snap = snapshot(symbols)
+            snap = _cached_snapshot(tuple(symbols))
             if snap.empty:
                 st.warning("未获取到实时行情（可能非交易时段或接口限流），"
                            "可切换数据源重试。")
@@ -715,7 +728,9 @@ with tab_realtime:
                     fallback = fallback.fillna(close_panel.loc[d0, pick_syms])
                     prices = prices.reindex(fallback.index).fillna(fallback)
                     try:
-                        acc_realtime = account_snapshot(decision, close_panel, prices=prices)
+                        acc_realtime = account_snapshot(
+                            {**decision, "initial_capital": float(capital)},
+                            close_panel, prices=prices)
                     except Exception:  # noqa: BLE001
                         acc_realtime = None
                     if acc_realtime is not None:
