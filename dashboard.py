@@ -648,6 +648,9 @@ with tab_realtime:
                            "可切换数据源重试。")
             else:
                 close_panel = load_panel_close(data_dir)
+                kline_lookup = snap.set_index("代码")[
+                    ["现价", "今开", "最高", "最低", "成交量(手)"]].to_dict("index") \
+                    if {"现价", "今开", "最高", "最低", "成交量(手)"} <= set(snap.columns) else {}
                 acc_realtime = None
                 d0 = pd.Timestamp(decision["date"])
                 if close_panel is not None and d0 in close_panel.index:
@@ -711,6 +714,50 @@ with tab_realtime:
                 st.caption(f"决策日期 {decision['date']}，共 {len(snap)} 只；"
                            "「自决策日涨跌」为现价相对决策日收盘的变化，"
                            "「实时盈亏率」为现价相对持仓成本。")
+                # 动态K线：本地日线 + 实时快照拼接当日 bar，随 10s 自动刷新动态更新
+                st.subheader("动态K线（自动刷新时实时更新）")
+                ksym = st.selectbox("选择个股",
+                                    [p["symbol"] for p in decision["picks"]],
+                                    key="realtime_kline_symbol")
+                kdf = load_symbol(data_dir, ksym)
+                if kdf is None or kdf.empty:
+                    st.info("本地无该股K线数据。")
+                else:
+                    tail = kdf.tail(60).copy()
+                    q = kline_lookup.get(ksym)
+                    today = pd.Timestamp.today().normalize()
+                    if q is not None and tail.index.max().date() < today.date():
+                        now = q.get("现价")
+                        if now not in (None, "-") and float(now) > 0:
+                            now = float(now)
+                            o = float(q["今开"]) if q.get("今开") not in (None, "-") else now
+                            hi = float(q["最高"]) if q.get("最高") not in (None, "-") else now
+                            lo = float(q["最低"]) if q.get("最低") not in (None, "-") else now
+                            vol = float(q.get("成交量(手)") or 0) * 100
+                            tail.loc[today] = {
+                                "open": o, "high": max(hi, now), "low": min(lo, now),
+                                "close": now, "volume": vol,
+                            }
+                    tail = tail.sort_index()
+                    kfig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                                         vertical_spacing=0.03, row_heights=[0.75, 0.25])
+                    kfig.add_trace(go.Candlestick(
+                        x=tail.index, open=tail["open"], high=tail["high"],
+                        low=tail["low"], close=tail["close"], name=ksym), row=1, col=1)
+                    for n in (5, 20, 60):
+                        kfig.add_trace(go.Scatter(x=tail.index,
+                                                  y=tail["close"].rolling(n).mean(),
+                                                  name=f"MA{n}", line=dict(width=1)),
+                                       row=1, col=1)
+                    if "volume" in tail.columns:
+                        kfig.add_trace(go.Bar(x=tail.index, y=tail["volume"],
+                                              name="成交量", marker_color="#bdc3c7"),
+                                       row=2, col=1)
+                    kfig.update_layout(title=f"{ksym} 动态K线（最近 {len(tail)} 个交易日）",
+                                       height=520, xaxis_rangeslider_visible=False)
+                    st.plotly_chart(kfig, width="stretch")
+                    st.caption("最后一根为实时快照拼接的当日 bar（现价/高低随刷新更新）；"
+                               "开启上方「自动刷新」后每 10 秒动态变化。")
         except Exception as e:  # noqa: BLE001
             st.error(f"实时行情获取失败：{e}")
 
