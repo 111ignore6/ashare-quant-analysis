@@ -6,6 +6,7 @@ dist/
 *.spec
 .worktrees/
 dashboard_smoke.log
+*_noon_bak/
 __pycache__/
 .pytest_cache/
 *.pyc
