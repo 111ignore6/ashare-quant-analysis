@@ -68,6 +68,12 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
   成本=现价、本期收益恒为 0），与账户页累计净值（98,599）对不上。账户页/
   总览/实时行情三处口径统一：实时总收益=总资产/初始资金-1（累计），
   本期浮动盈亏=现价相对决策日成本；绩效指标不足 20 个交易日不展示。
+- **仪表盘 `st.cache_data` 必须设 TTL（≤60s）**：面板/账户/决策文件每日更新后
+  内容会变，无 TTL 会整个会话用旧数据（账户 CSV 曾可能滞留一整天）；TTL 太长
+  （如 600s）也会在更新后短暂出现"决策日期 > 面板截止"的假警告。
+- **计划任务输出要落日志**：`scripts/schedule_daily.ps1` 已改为 PowerShell
+  包装 + `*>> logs\daily_scheduled.log` + 显式 `--model-dir models\all`；
+  重新注册需要管理员跑 `schedule_daily.ps1 -Force`。
 - **每日决策模型池由 `config.yaml` 的 `models` 字段控制**（2026-08-11 起）：
   空列表回退默认 6 模型。当前池 = lgbm/xgb/rank_lgb/huber_lgb/risk_aware_lgb/
   temporal_decay_lgb；换池必须 `daily --retrain`。

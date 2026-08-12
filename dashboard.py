@@ -108,14 +108,14 @@ def format_metric(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_csv(path: Path):
     if not Path(path).exists():
         return None
     return pd.read_csv(path, index_col=0, parse_dates=True)
 
 
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_json(path: Path):
     if not Path(path).exists():
         return None
@@ -144,7 +144,7 @@ def load_decision(sim_dir: Path) -> dict | None:
     return best
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def load_panel_close(data_dir: Path):
     """读取面板缓存中的收盘价矩阵（date × symbol）。"""
     p = data_dir / "panels" / "close.parquet"
@@ -159,7 +159,7 @@ def _cached_snapshot(symbols: tuple) -> pd.DataFrame:
     return snapshot(list(symbols))
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def load_symbol(data_dir: Path, code: str):
     """读取单只股票本地日线（K线详情用，秒级）。"""
     p = data_dir / f"{code}.parquet"

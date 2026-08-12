@@ -19,8 +19,16 @@ if ($existing) {
 $python = (Get-Command python).Source
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At 16:05
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
-$action = New-ScheduledTaskAction -Execute $python `
-    -Argument "-m ashare_quant.cli daily --config `"$ProjectRoot\config.yaml`" --data-root `"$DataRoot`" --out-dir `"$OutDir`"" `
+$logDir = "$ProjectRoot\logs"
+$logFile = "$logDir\daily_scheduled.log"
+# 用 PowerShell 包装：显式指定模型目录 + 输出重定向到日志（任务失败可追溯）
+$inner = "New-Item -ItemType Directory -Force -Path '$logDir' | Out-Null; " +
+         "& '$python' -X utf8 -u -m ashare_quant.cli daily " +
+         "--config '$ProjectRoot\config.yaml' --data-root '$DataRoot' " +
+         "--out-dir '$OutDir' --model-dir '$ProjectRoot\models\all' " +
+         "*>> '$logFile' 2>&1"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$inner`"" `
     -WorkingDirectory $ProjectRoot
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "A股量化研究：每个交易日收盘后增量更新数据并生成报告（模拟，不构成投资建议）"
 # 尊重 config.yaml 的 auto_update 开关（默认开启）
