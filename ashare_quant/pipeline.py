@@ -109,6 +109,12 @@ def _load_panel_cache(store: ParquetStore, index_symbol: str):
         return None
     if meta.get("fingerprint") != _manifest_fingerprint(store.read_manifest()):
         return None
+    # 指纹只含 manifest 元数据（起止/行数），数据回滚等场景可能指纹相同但
+    # 面板内容滞后（08-12 曾复用到 08-11 旧面板导致决策卡住）。直接校验
+    # 缓存面板的实际最后日期 == manifest 指数截止，不一致即重建。
+    idx_end = store.read_manifest().get(index_symbol, {}).get("end")
+    if not idx_end or str(meta.get("last_date", "")) != str(idx_end):
+        return None
     def _read(name: str) -> pd.DataFrame:
         return pd.read_parquet(cache_dir / f"{name}.parquet")
     try:
@@ -132,6 +138,7 @@ def _save_panel_cache(store: ParquetStore, index_symbol: str, panels: dict) -> N
     meta = {
         "index_symbol": index_symbol,
         "fingerprint": _manifest_fingerprint(store.read_manifest()),
+        "last_date": str(panels["close"].index.max().date()),
     }
     (cache_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8")
