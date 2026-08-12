@@ -8,7 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from .cache import ParquetStore
-from .calendar import market_session
+from .calendar import drop_intraday_today, market_session
 from .config import Config
 
 
@@ -74,6 +74,10 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
     except TypeError:
         # 兼容只接受 symbol 的旧签名数据源
         idx_df = index_fetcher(index_symbol)
+    if idx_df is not None and not idx_df.empty:
+        # 盘中：当日 bar 未收盘确认，不推进"最新交易日"（否则盘中价被当
+        # 成收盘写入，污染日线/决策/账户；等收盘后 16:05 正式更新）
+        idx_df = drop_intraday_today(idx_df)
     if idx_df is not None and not idx_df.empty:
         store.append(index_symbol, idx_df)
         last = idx_df.index.max()

@@ -1,5 +1,6 @@
 import pandas as pd
-from ashare_quant.calendar import TradingCalendar, market_session
+from ashare_quant.calendar import (TradingCalendar, drop_intraday_today,
+                                   market_session)
 
 
 def test_window_and_contains():
@@ -29,3 +30,20 @@ def test_market_session_times():
     }
     for ts, expected in cases.items():
         assert market_session(ts) == expected, (ts, market_session(ts))
+
+
+def test_drop_intraday_today(monkeypatch):
+    """盘中不允许把"今天"的未收盘行推进；收盘后放行。
+
+    回归：08-12 中午更新把盘中价当收盘写入日线 → 决策日期跳到 08-12，
+    实时估值"缺少决策日基准"（面板还是 08-11）。盘中必须挡住当日行。
+    """
+    idx = pd.to_datetime(["2026-08-11", "2026-08-12"])
+    df = pd.DataFrame({"close": [9.21, 9.17]}, index=idx)
+    monkeypatch.setattr("ashare_quant.calendar.market_session", lambda: "lunch")
+    out = drop_intraday_today(df)
+    assert list(out.index) == [pd.Timestamp("2026-08-11")]
+    # 收盘后保留当日行
+    monkeypatch.setattr("ashare_quant.calendar.market_session", lambda: "post")
+    out2 = drop_intraday_today(df)
+    assert len(out2) == 2

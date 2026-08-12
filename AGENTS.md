@@ -38,6 +38,14 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
 
 - `daily.py::update_daily`：指数先更新 → 落后股票增量 → 失败冷却表
   `update_failed.json`（当日失败不重试，次日自动恢复）。
+  - **盘中（pre/am/lunch/pm）不允许把"今天"的未收盘 bar 当最新交易日推进**
+    （`calendar.drop_intraday_today`）：mootdx 盘中可拉当日 bar，但那是盘中价，
+    写入后会把决策日期推到当天、污染日线/账户（08-12 中午"缺少决策日基准"
+    和 08-11 +0.59% 都是这个根因）。盘中点「每日更新」= 白点，收盘后
+    （16:05 计划任务）才正式更新。
+  - 手动回滚盘中污染的标准流程：备份小文件 → 批量截掉 `*.parquet` 当日行
+    → 移走 panels/features 缓存 → 账户历史去掉当日条目 → `daily --force`
+    重建 → **`fetch` 重建 manifest**（否则 manifest 仍显示当日，16:05 会跳过）。
   - 盘中（`market_session()` 返回 am/lunch/pm）**不等待备源、no_data 不写冷却**
     （备源当日数据未生成，等也白等）；收盘后才走备源链 + 写冷却。
   - 批量层退避只针对 `failed`（风控/断连），**不针对 no_data**（停牌/未生成是正常）。

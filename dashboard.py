@@ -232,7 +232,14 @@ def render_realtime_valuation(decision: dict, data_dir: Path, key: str,
         dec_view = {**decision, "initial_capital": basis}
         acc = account_snapshot(dec_view, close_panel, prices=prices)
         if acc is None:
-            st.warning("无法按实时价估值（缺少决策日基准）。")
+            d0 = pd.Timestamp(decision["date"])
+            last = close_panel.index.max() if close_panel is not None else None
+            hint = ""
+            if last is not None and d0 > last:
+                hint = (f"（决策日期 {d0.date()} 晚于本地数据 {last.date()}——"
+                        "多半是盘中点了「每日更新」把决策日期提前了，"
+                        "收盘后 16:05 自动更新即恢复）")
+            st.warning(f"无法按实时价估值（缺少决策日基准）。{hint}")
             return
         r1, r2, r3, r4 = st.columns(4)
         r1.metric("实时总资产", f"{acc['total_asset']:,.0f} 元")

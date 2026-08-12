@@ -8,6 +8,7 @@ import time
 import pandas as pd
 
 from .cache import ParquetStore
+from .calendar import drop_intraday_today
 from .config import Config
 
 
@@ -18,7 +19,10 @@ def _fetch_with_fallback(code: str, cfg: Config, fetcher, fallbacks=None) -> pd.
         try:
             df = f(code, start_date_for(cfg), end_date_for(cfg), cfg.adjust)
             if not df.empty:
-                return df
+                # 盘中：去掉"今天"的未收盘行，避免盘中价当收盘写入缓存
+                df = drop_intraday_today(df)
+                if not df.empty:
+                    return df
         except Exception as e:  # noqa: BLE001
             last_err = e
     if last_err is not None:

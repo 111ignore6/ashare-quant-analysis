@@ -27,6 +27,22 @@ def market_session(now=None) -> str:
     return "post"
 
 
+def drop_intraday_today(df: pd.DataFrame) -> pd.DataFrame:
+    """盘中时段去掉"今天"的未收盘行（收盘后/周末原样返回）。
+
+    防止把盘中价当"当日收盘"写入日线/决策/账户——08-11 的 +0.59% 假收益和
+    08-12 中午"缺少决策日基准"都是这个根因：盘中更新把当日 bar 当成收盘，
+    决策日期随之跳到当天，与本地数据/账户口径错位。收盘后（16:05 计划
+    任务）再正式写入当日收盘。
+    """
+    if df is None or df.empty:
+        return df
+    if market_session() in ("pre", "am", "lunch", "pm"):
+        today = pd.Timestamp.today().normalize()
+        return df[df.index < today]
+    return df
+
+
 class TradingCalendar:
     """由日期序列构造的交易日历（去重、升序）。"""
 
