@@ -103,6 +103,23 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
 - 腾���快照（easyquotation tencent）：`now`=实时最新价，盘中为最后一笔
   成交，**15:00 收盘后冻结为收盘价**；`close`=昨收。本地不保存分时快照，
   盘中数字无法事后回放，收盘后则等价于收盘价。
+- **模型库损坏会让每日决策阶段整体崩溃**（08-27 实测）：xgboost 的
+  `lib\xgboost.dll`（约 140MB）被删/损坏后，`xgb.joblib` 加载失败 →
+  阶段 1/2 正常、阶段 3 崩溃，当天决策缺失（08-26 决策后 08-27 手动运行
+  挂掉）。修复：`python -m pip install --force-reinstall --no-deps xgboost`
+  （版本以 `pip show xgboost` 为准）。`load_models`（`ml/decision.py`）已改为
+  逐模型加载并对失败给出可操作报错（模型名+文件+修复提示），**不静默跳模型**
+  （决策悄悄缺模型比崩溃更危险）。若某库彻底不可用：从 `config.yaml` 的
+  `models` 移除该模型 → `daily --retrain`；换回后同样 `--retrain`。
+- **计划任务可能悄然消失**（08-14 后 AshareQuantDaily 不存在，16:05 不再
+  自动运行，期间只有手动 run 维持决策；`daily_scheduled.log` 停更在 08-14）。
+  检查：`schtasks /query /tn AshareQuantDaily`（报"找不到文件"= 已消失）；
+  恢复：有权限终端跑 `scripts/schedule_daily.ps1 -Force`，注册后验证
+  `Get-ScheduledTaskInfo -TaskName AshareQuantDaily` 的 NextRunTime。
+- **测试不要硬编码"今天"的日期**：`drop_intraday_today` 按实时钟比较，
+  08-12 的回归测试硬编码 08-12 作"今天"，日期一过就挂（08-27 全量测试
+  红一个）。涉及当日语义的测试用 `pd.Timestamp.today().normalize() ± 1天`
+  构造（见 `tests/test_calendar.py`）。
 
 ## 常用命令
 
@@ -127,10 +144,15 @@ python -m ruff check .               # 静态检查
 - 数据目录 `data/tencent`：5332 只 × 3 年日线 + `panels/` 面板缓存 +
   `portfolio/` 账户历史；`update_stats.json` 记录最近一次每日更新耗时。
 
-## 当前状态（2026-08-11）
+## 当前状态（2026-08-27）
 
-- 全市场 5332 只日线已到 2026-08-11；账户正式决策自 08-10 起（2 次）。
-- 计划任务 AshareQuantDaily（周一至五 16:05）默认开启；若需更新任务
-  out-dir 用管理员跑 `scripts/schedule_daily.ps1 -Force`。
-- 已修复并验证：mootdx qfq 未来除权缩放 bug、北交所 920 空 xdxr 丢列、
+- 全市场 5346 只日线已到 2026-08-27；账户正式决策 15 次（08-10 起逐日），
+  08-27 决策已生成（+4.56%，含 xgb 六模型全参与）；面板缓存指纹校验正常。
+- 计划任务 AshareQuantDaily（周一至五 16:05）已重新注册并开启（08-27 发现
+  它已消失数日）；下次运行 08-28 16:05。检查/恢复方法见上文"计划任务可能
+  悄然消失"。
+- 已修复并验证：xgboost.dll 缺失导致 08-27 决策崩溃（重装 + `load_models`
+  可操作报错）、时间炸弹测试（`test_calendar.py` 按实时钟构造日期）、
+  账户 `_prepend_start_point` 空序列 concat 弃用告警。
+- 历史修复仍有效：mootdx qfq 未来除权缩放 bug、北交所 920 空 xdxr 丢列、
   实时估值 +0.59% 假收益（根因=盘中价当成本口径错配，已可精确复现）。

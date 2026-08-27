@@ -170,6 +170,9 @@ def _prepend_start_point(history: list[dict], equity: pd.Series,
     start = pd.Timestamp(entries[0]["date"])
     if start in equity.index:
         return equity
+    if equity.empty:
+        # 空曲线直接补建仓基准点；显式分支避免 pd.concat 空序列的弃用告警
+        return pd.Series([float(capital)], index=[start])
     return pd.concat([pd.Series([float(capital)], index=[start]), equity]).sort_index()
 
 

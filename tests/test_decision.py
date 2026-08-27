@@ -1,5 +1,8 @@
+import json
+
 import numpy as np
 import pandas as pd
+import pytest
 from ashare_quant.ml.decision import decide, load_models, train_and_save
 from ashare_quant.ml.features import build_dataset
 
@@ -39,3 +42,17 @@ def test_decide_ignores_target_column(tmp_path):
     X_with_target["target"] = 0.0
     picks = decide(loaded, X_with_target, close, last_date, top_n=5)
     assert len(picks) == 5
+
+
+def test_load_models_broken_library_gives_actionable_error(tmp_path):
+    """模型库安装损坏（如 xgboost.dll 缺失）时给出可操作的错误信息，而不是裸 traceback。
+
+    回归：08-27 每日任务在 load_models 崩溃，日志只有深层 pickle traceback。
+    """
+    (tmp_path / "meta.json").write_text(
+        json.dumps({"models": ["xgb"], "thresholds": {}, "trained_on": "2026-08-27"}),
+        encoding="utf-8")
+    (tmp_path / "xgb.joblib").write_bytes(b"\x00")  # 无法反序列化的损坏文件
+    with pytest.raises(RuntimeError, match="xgb") as ei:
+        load_models(tmp_path)
+    assert "xgboost" in str(ei.value)  # 错误信息给出修复提示（涉及库名）

@@ -59,7 +59,23 @@ def train_and_save(X: pd.DataFrame, y: pd.Series, out_dir: Path,
 def load_models(out_dir: Path) -> dict:
     out_dir = Path(out_dir)
     meta = json.loads((out_dir / "meta.json").read_text(encoding="utf-8"))
-    models = {name: joblib.load(out_dir / f"{name}.joblib") for name in meta["models"]}
+    models: dict[str, object] = {}
+    for name in meta["models"]:
+        path = out_dir / f"{name}.joblib"
+        try:
+            models[name] = joblib.load(path)
+        except Exception as exc:  # noqa: BLE001 - 包装为可操作的调度错误
+            # 历史上遇到：xgboost.dll 缺失导致 xgb.joblib 加载失败，整个
+            # 每日决策阶段崩溃且日志只有深层 pickle traceback，无法定位。
+            # 保持 fail-fast（决策不允许悄悄缺模型），但给出明确修复路径。
+            raise RuntimeError(
+                f"模型 {name} 加载失败: {path}\n"
+                f"原因: {exc}\n"
+                "通常是该模型对应的机器学习库安装损坏或版本不兼容（例如 "
+                "xgboost 缺少 xgboost.dll）。修复: python -m pip install "
+                "--force-reinstall --no-deps xgboost 或 lightgbm / "
+                "scikit-learn（以报错提到的库为准）。"
+            ) from exc
     return {"models": models, "meta": meta}
 
 

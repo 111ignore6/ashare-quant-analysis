@@ -38,11 +38,14 @@ def test_drop_intraday_today(monkeypatch):
     回归：08-12 中午更新把盘中价当收盘写入日线 → 决策日期跳到 08-12，
     实时估值"缺少决策日基准"（面板还是 08-11）。盘中必须挡住当日行。
     """
-    idx = pd.to_datetime(["2026-08-11", "2026-08-12"])
+    # 用实时钟构造"今天/昨天"，避免硬编码日期导致测试随机器日期失效
+    today = pd.Timestamp.today().normalize()
+    yesterday = today - pd.Timedelta(days=1)
+    idx = pd.to_datetime([yesterday.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")])
     df = pd.DataFrame({"close": [9.21, 9.17]}, index=idx)
     monkeypatch.setattr("ashare_quant.calendar.market_session", lambda: "lunch")
     out = drop_intraday_today(df)
-    assert list(out.index) == [pd.Timestamp("2026-08-11")]
+    assert list(out.index) == [pd.Timestamp(yesterday)]
     # 收盘后保留当日行
     monkeypatch.setattr("ashare_quant.calendar.market_session", lambda: "post")
     out2 = drop_intraday_today(df)
