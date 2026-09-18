@@ -22,6 +22,20 @@ class Config:
     rate_limit_per_second: float = 2.0
     top_n: int = 50
     rebalance: str = "M"
+    # 交易成本：账户净值在每次换仓时按这三项扣费（默认值与 backtest/engine.py 一致）。
+    # 2026-09-16 之前账户一分钱成本都没扣，而换手是每日级（单边约 59%），
+    # 实测成本一项就会吃掉约 76% 的账面收益 —— 不扣等于系统性高估。
+    commission: float = 0.00025   # 佣金（双边）
+    stamp: float = 0.0005         # 印花税（仅卖出）
+    slippage: float = 0.001       # 滑点（双边）
+    # 训练目标口径：raw=未来 20 日原始收益（历史口径）；excess=同一天横截面去均值。
+    # 策略是横截面 Top-N 且永远满仓，市场共同波动那一块选谁都一样 —— 用 raw 训练
+    # 会让模型把容量花在当天排名用不到的成分上。2026-09-16 A/B 实测（walk-forward）：
+    # excess 在两个可比较的回归模型上都更好（lgbm −0.56%→−0.09%、huber −0.92%→+0.13%
+    # 日均截面超额），rank_lgb 因只用当日相对顺序而完全不变（机制自证）。
+    # **但默认仍为 raw**：有效独立样本仅约 12 个（20 日前瞻收益高度重叠），
+    # 证据是"方向一致的建议"而非"已证实"，故不擅自改动生产模型。要切换改这一行为 excess。
+    target_mode: str = "raw"
     initial_capital: float = 100000.0
     stop_loss: float | None = None
     take_profit: float | None = None

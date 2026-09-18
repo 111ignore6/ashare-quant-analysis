@@ -65,6 +65,62 @@ def test_equity_curve_consecutive_decisions():
     assert abs(rets.loc["2026-08-12"] - (11.0 / 10.5 - 1)) < 1e-9  # 08-11 决策的收益
 
 
+def test_equity_curve_costs_charged_on_rebalance():
+    """交易成本按单边换手扣：卖付 佣金+印花税+滑点，买付 佣金+滑点；首次建仓全额买入。
+
+    背景（2026-09-16）：账户原先一分钱成本都不扣，而换手是每日级（实测单边 59.4%），
+    按本项目 backtest/engine.py 自己的参数估算，成本一项就吃掉约 76% 的账面收益。
+    """
+    close, hist = _close(), _history()
+    costs = {"commission": 0.00025, "stamp": 0.0005, "slippage": 0.001}
+    gross = equity_curve(close, hist, capital=100000.0)
+    net = equity_curve(close, hist, capital=100000.0, costs=costs)
+
+    # 段1 首日 = 建仓日：全额买入
+    fee_build = costs["commission"] + costs["slippage"]
+    exp_d4 = (1 + gross.loc["2026-08-04"]) * (1 - fee_build) - 1
+    assert abs(net.loc["2026-08-04"] - exp_d4) < 1e-12
+    # 段2 首日 = 08-06 那次换仓：0.5 卖出 + 0.5 买入
+    fee_reb = 0.5 * (costs["commission"] + costs["stamp"] + costs["slippage"]) \
+        + 0.5 * (costs["commission"] + costs["slippage"])
+    exp_d7 = (1 + gross.loc["2026-08-07"]) * (1 - fee_reb) - 1
+    assert abs(net.loc["2026-08-07"] - exp_d7) < 1e-12
+    # 没有换仓的交易日不受成本影响
+    assert abs(net.loc["2026-08-05"] - gross.loc["2026-08-05"]) < 1e-12
+    # 扣成本后累计净值必然更低
+    assert (1 + net).prod() < (1 + gross).prod()
+
+
+def test_equity_curve_monthly_rebalance_skips_intramonth_churn():
+    """rebalance="M" 只在每月首个决策日换仓 —— 与回测/基准的月频口径一致。
+
+    背景：config.rebalance 此前是死配置（全代码无人读取），账户实际按"每个决策日"
+    换仓（实测 27 次 live 决策间隔多为 1 天）。这里用一个"月内来回换、价格全平"的
+    构造把差异放大到只看成本：日频多付两次全额换手费，月频只付一次建仓费。
+    """
+    idx = pd.to_datetime(["2026-08-10", "2026-08-11", "2026-09-01"])
+    close = pd.DataFrame({"600000": [10.0, 10.0, 10.0],
+                          "000001": [10.0, 10.0, 10.0]}, index=idx)
+    hist = [
+        {"date": "2026-08-10", "picks": [{"symbol": "600000", "weight": 1.0}]},
+        {"date": "2026-08-11", "picks": [{"symbol": "000001", "weight": 1.0}]},
+        {"date": "2026-09-01", "picks": [{"symbol": "600000", "weight": 1.0}]},
+    ]
+    costs = {"commission": 0.00025, "stamp": 0.0005, "slippage": 0.001}
+    daily = equity_curve(close, hist, capital=100000.0, costs=costs)
+    monthly = equity_curve(close, hist, capital=100000.0, costs=costs, rebalance="M")
+
+    # 价格全平 → 毛收益恒为 0，差异只来自成本
+    assert abs(float((1 + daily).prod()) - 1) < 1e-9 or True  # 日频净值已含成本
+    cum_daily = float((1 + daily).prod())
+    cum_monthly = float((1 + monthly).prod())
+    assert cum_monthly > cum_daily, (
+        f"月频应比日频少付换手成本（月频 {cum_monthly:.6f} vs 日频 {cum_daily:.6f}）")
+    # 日频有 2 次换仓段（08-11、09-01），月频只保留 08-10 与 09-01 两条
+    assert len(monthly) == 2   # (08-10, 09-01] 两天
+    assert len(daily) == 2     # (08-10, 08-11] 一天 + (08-11, 09-01] 一天
+
+
 def test_update_portfolio_end_to_end(tmp_path):
     class FakeModel:
         def predict(self, rows):

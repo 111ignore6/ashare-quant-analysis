@@ -67,16 +67,51 @@ def build_historical_decisions(close: pd.DataFrame, X: pd.DataFrame, models: dic
     return added
 
 
+DEFAULT_COSTS = {"commission": 0.00025, "stamp": 0.0005, "slippage": 0.001}
+"""与 backtest/engine.py 的默认参数一致（佣金 0.025% + 印花税 0.05% + 滑点 0.1%）。"""
+
+
+def _monthly_entries(entries: list[dict]) -> list[dict]:
+    """按自然月取每月第一条决策作为当月调仓日（rebalance="M"）。
+
+    为什么需要它（2026-09-16 实测）：回测与 ML 基准走 monthly_rebalance_dates（月频），
+    而账户原先直接用相邻决策日分段 —— 决策是每天生成的，于是账户实际在"每日换仓"。
+    实测 27 次 live 决策间隔 {1天:18, 2天:2, 3天:6}、单边换手率均值 59.4%，
+    即账户跑的策略与"月度调仓 Top-50"根本不是同一个东西。config.rebalance 此前
+    声明了却无人读取（死配置），这里让它真正生效。
+    """
+    out: list[dict] = []
+    seen: set = set()
+    for e in entries:
+        key = pd.Timestamp(e["date"]).to_period("M")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
+
+
 def equity_curve(close: pd.DataFrame, history: list[dict],
-                 capital: float = 100000.0) -> pd.Series:
-    """由决策历史计算日度账户收益序列（按决策日等权换仓）。"""
+                 capital: float = 100000.0, costs: dict | None = None,
+                 rebalance: str | None = None) -> pd.Series:
+    """由决策历史计算日度账户收益序列（按决策日等权换仓）。
+
+    costs: {"commission","stamp","slippage"} → 在每次换仓时扣交易成本；
+        None = 不扣（**毛收益，仅供对比，不代表可实现收益**）。成本按单边换手计：
+        卖出部分付 佣金+印花税+滑点，买入部分付 佣金+滑点；首次建仓全额买入。
+    rebalance: "M" = 每月首个决策日才换仓（与回测/基准同口径）；
+        None 或 "D" = 每次决策都换仓（改动前的旧行为）。
+    """
     # 优先用正式决策（mode=live，样本外）；无正式记录时回退全部（参考用途）
     live = [e for e in history if e.get("mode") == "live"]
     entries = live if live else history
     if not entries:
         return pd.Series(dtype=float)
+    if rebalance and str(rebalance).upper().startswith("M"):
+        entries = _monthly_entries(entries)
     dates = close.index
     seg_returns = []
+    prev_w: dict[str, float] = {}
     for i, dec in enumerate(entries):
         d0 = pd.Timestamp(dec["date"])
         if d0 not in close.index:
@@ -99,6 +134,21 @@ def equity_curve(close: pd.DataFrame, history: list[dict],
         if total <= 0:
             continue
         weights = weights / total
+        wmap = {s: float(w) for s, w in zip(syms, weights) if w > 0}
+        # ---- 交易成本：按与上一期持仓的单边换手计 ----
+        fee = 0.0
+        if costs:
+            c = float(costs.get("commission", 0.0))
+            st = float(costs.get("stamp", 0.0))
+            sl = float(costs.get("slippage", 0.0))
+            if prev_w:
+                allsym = set(prev_w) | set(wmap)
+                sold = sum(max(0.0, prev_w.get(s, 0.0) - wmap.get(s, 0.0)) for s in allsym)
+                bought = sum(max(0.0, wmap.get(s, 0.0) - prev_w.get(s, 0.0)) for s in allsym)
+            else:
+                sold, bought = 0.0, 1.0      # 首次建仓：全额买入
+            fee = sold * (c + st + sl) + bought * (c + sl)
+        prev_w = wmap
         prev = base.to_numpy(dtype=float)
         rets = []
         for t in seg:
@@ -106,6 +156,9 @@ def equity_curve(close: pd.DataFrame, history: list[dict],
             day_ret = np.nan_to_num(cur / np.where(prev > 0, prev, np.nan) - 1, nan=0.0)
             rets.append(float((day_ret * weights).sum()))
             prev = np.where(np.isfinite(cur), cur, prev)
+        if fee and rets:
+            # 成本在换仓当日一次性扣掉（乘性，避免把小比例当线性叠加）
+            rets[0] = (1 + rets[0]) * (1 - fee) - 1
         seg_returns.append(pd.Series(rets, index=seg))
     if not seg_returns:
         return pd.Series(dtype=float)
@@ -127,10 +180,21 @@ def monthly_returns_table(returns: pd.Series) -> pd.DataFrame:
     return piv
 
 
+def costs_from_config(cfg) -> dict:
+    """从 Config 取交易成本三件套（缺失时用 engine.py 的默认值）。"""
+    return {
+        "commission": float(getattr(cfg, "commission", DEFAULT_COSTS["commission"])),
+        "stamp": float(getattr(cfg, "stamp", DEFAULT_COSTS["stamp"])),
+        "slippage": float(getattr(cfg, "slippage", DEFAULT_COSTS["slippage"])),
+    }
+
+
 def recompute_account(history: list[dict], close: pd.DataFrame,
-                      capital: float = 100000.0) -> tuple[pd.Series, dict]:
+                      capital: float = 100000.0, costs: dict | None = None,
+                      rebalance: str | None = None) -> tuple[pd.Series, dict]:
     """按给定初始资金重算净值曲线与绩效指标（不写文件，仪表盘预览用）。"""
-    returns = equity_curve(close, history, capital=capital)
+    returns = equity_curve(close, history, capital=capital, costs=costs,
+                           rebalance=rebalance)
     if returns.empty:
         return pd.Series(dtype=float), {}
     equity = (1 + returns.fillna(0)).cumprod() * capital
@@ -140,16 +204,22 @@ def recompute_account(history: list[dict], close: pd.DataFrame,
 
 
 def account_basis(history: list[dict], close: pd.DataFrame, date,
-                  capital: float = 100000.0) -> float:
+                  capital: float = 100000.0, costs: dict | None = None,
+                  rebalance: str | None = None) -> float:
     """决策日时的累计净资产（自首个正式决策日跟踪的净值曲线取值）。
 
     实时估值若始终按「初始资金」作基准，会在每个决策日重置回初始值——
     例如 08-11 收盘刚生成决策时，本期收益恒为 0、总资产显示 10 万，
     与账户页累计净值（98,599）对不上。改用决策日累计净资产作基准后，
     实时总资产=决策日资产 × 现价/成本，收盘后即与账户页一致。
+
+    costs/rebalance 必须与账户页、与 portfolio.update_portfolio 写盘时一致：
+    否则实时估值会按另一套口径算出另一个基准（2026-09-16 实测：漏传这两个参数时
+    实时页显示 106,313，而账户页已是 107,274，同一页面出现两个"总资产"）。
     """
     live = [e for e in history if e.get("mode") == "live"] or history
-    equity, _ = recompute_account(live, close, capital)
+    equity, _ = recompute_account(live, close, capital, costs=costs,
+                                  rebalance=rebalance)
     if equity.empty:
         return float(capital)
     d0 = pd.Timestamp(date)
@@ -253,7 +323,12 @@ def update_portfolio(close: pd.DataFrame, cfg, portfolio_dir: Path,
         decision = {**decision, "mode": "live"}
         append_decision(history_path, decision)
     history = load_history(history_path)
-    returns = equity_curve(close, history, float(cfg.initial_capital))
+    # 账户口径：扣交易成本 + 按 config.rebalance 的节奏换仓（默认 M=月频，与回测一致）。
+    # 改动前这里既不扣成本也不读 rebalance，等于在模拟"每日全额换仓且零成本"，
+    # 会把账面收益显著高估（2026-09-16 实测：成本一项就吃掉约 76% 的账面收益）。
+    returns = equity_curve(close, history, float(cfg.initial_capital),
+                           costs=costs_from_config(cfg),
+                           rebalance=getattr(cfg, "rebalance", "M"))
     equity = ((1 + returns.fillna(0)).cumprod() * float(cfg.initial_capital))
     equity = _prepend_start_point(history, equity, float(cfg.initial_capital))
     equity.to_csv(portfolio_dir / EQUITY_FILENAME, encoding="utf-8-sig")

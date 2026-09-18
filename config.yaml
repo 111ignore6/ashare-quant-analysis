@@ -1,14 +1,32 @@
 data_root: data/tencent
 universe_mode: all
-data_source: mootdx
-fallback_source: akshare
+# 2026-09-11 变更：mootdx（通达信 TCP 7709）公开服务器从本机基本连不上，
+# 而旧版 update_daily 把"指数取不到"当成"今天没有新交易日"，数据冻结在 09-09。
+# 现在指数与个股都走"主源 → 多级备源"链；主源改为覆盖完整、且复权价与历史
+# 逐日一致（实测 30 只 × 3 个重叠日 0.00% 偏差）的新浪/akshare，tencent 兜
+# 当日 bar，mootdx 留在链尾——等它恢复只需把 data_source 改回 mootdx。
+data_source: akshare
+fallback_sources:
+- tencent
+- mootdx
+fallback_source: tencent
 years: 3
 adjust: qfq
 max_workers: 12
 retry: 3
 rate_limit_per_second: 2
 top_n: 50
+# 换仓节奏：M=每月首个决策日换仓（与回测/基准同口径）；D=每个决策日都换（旧行为，换手极高）
+# 2026-09-16 之前这个字段是死配置（全代码无人读取），账户实际按"每个决策日"换仓。
 rebalance: M
+# 交易成本：账户净值按此扣费（默认与 backtest/engine.py 一致）。
+# 设 0 即回到"毛收益"口径 —— 但那不代表可实现收益，仅用于对比。
+commission: 0.00025   # 佣金（双边）
+stamp: 0.0005         # 印花税（仅卖出）
+slippage: 0.001       # 滑点（双边）
+# 训练目标口径：raw=未来 20 日原始收益（当前默认）；excess=同日横截面去均值。
+# 改 excess 需 `daily --retrain`（特征缓存指纹含此项，会自动重建，不会串用旧表）。
+target_mode: raw
 initial_capital: 100000.0
 stop_loss: -0.15
 take_profit: 0.3

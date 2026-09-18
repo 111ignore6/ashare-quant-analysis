@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 
 from ..backtest.metrics import metrics_from_returns
-from ..backtest.simple import monthly_rebalance_dates, simple_topn_returns
+from ..backtest.simple import (DEFAULT_COSTS, monthly_rebalance_dates,
+                                    simple_topn_returns)
 from ..models.candidates import LowVolModel, MomentumModel, MultiFactorModel, ReversalModel
 from ..research.factor_stats import cross_sectional_ic, forward_returns
 from ..research.factors import compute_factors, winsorize_zscore
@@ -17,6 +18,11 @@ from ..screening import walk_forward_folds
 from .evaluate import walk_forward_ml_evaluate
 from .features import build_dataset
 from .models import MODELS
+
+# 基准一律按**净收益**（扣交易成本）比较。理由（2026-09-16 审查）：本文件此前
+# 调用 simple_topn_returns 全部零成本，而毛收益会系统性偏向高换手模型 ——
+# 用它做模型选型等于在奖励换手。成本参数与 backtest/engine.py 一致。
+BENCH_COSTS = dict(DEFAULT_COSTS)
 
 
 def _valid_rdates(folds) -> list:
@@ -32,7 +38,7 @@ def baseline_returns(close: pd.DataFrame, volume: pd.DataFrame, folds, top_n: in
             {"volume_ratio": 0.4, "ma_deviation": 0.2, "reversal60": 0.2, "lowvol": 0.2}),
     }
     rdates = _valid_rdates(folds)
-    return {name: simple_topn_returns(m.score(close, volume), close, rdates, top_n=top_n)
+    return {name: simple_topn_returns(m.score(close, volume), close, rdates, top_n=top_n, costs=BENCH_COSTS)
             for name, m in models.items()}
 
 
@@ -54,7 +60,7 @@ def ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
         rows = X[X.index.get_level_values("date").isin(rdates)]
         preds = np.mean([m.predict(rows) for m in fitted], axis=0)
         score = pd.Series(preds, index=rows.index).unstack("symbol")
-        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n))
+        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n, costs=BENCH_COSTS))
     return pd.concat(all_rets)
 
 
@@ -84,7 +90,7 @@ def rank_ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
             pred = pd.Series(m.predict(rows), index=rows.index)
             ranks.append(pred.groupby(level="date").rank(pct=True))
         score = pd.concat(ranks, axis=1).mean(axis=1).unstack("symbol")
-        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n))
+        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n, costs=BENCH_COSTS))
     return pd.concat(all_rets)
 
 
@@ -117,7 +123,7 @@ def agreement_ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFram
         rank_df = pd.concat(ranks, axis=1)
         score = (rank_df.mean(axis=1) - penalty * rank_df.std(axis=1)
                  ).unstack("symbol")
-        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n))
+        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n, costs=BENCH_COSTS))
     return pd.concat(all_rets)
 
 
@@ -150,7 +156,7 @@ def ic_rank_ensemble_returns(X: pd.DataFrame, y: pd.Series, close: pd.DataFrame,
             ranks.append(pred.groupby(level="date").rank(pct=True))
         rank_df = pd.concat(ranks, axis=1)
         score = (rank_df * w).sum(axis=1).unstack("symbol")
-        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n))
+        all_rets.append(simple_topn_returns(score, close, rdates, top_n=top_n, costs=BENCH_COSTS))
     return pd.concat(all_rets)
 
 
@@ -184,7 +190,7 @@ def conformal_returns(make_model, X: pd.DataFrame, y: pd.Series, close: pd.DataF
         conf = preds.abs() / threshold if threshold > 0 else pd.Series(1.0, index=preds.index)
         gated = preds * conf.clip(upper=1.0)
         score = gated.unstack("symbol")
-        all_rets.append(simple_topn_returns(score, close, eval_dates, top_n=top_n))
+        all_rets.append(simple_topn_returns(score, close, eval_dates, top_n=top_n, costs=BENCH_COSTS))
     nonempty = [r for r in all_rets if len(r)]
     return pd.concat(nonempty) if nonempty else pd.Series(dtype=float)
 
@@ -212,7 +218,7 @@ def regime_routing_returns(close: pd.DataFrame, volume: pd.DataFrame,
             state_dates = [d for d in tr_rdates if states.get(d) == state]
             best, best_mean = None, -np.inf
             for name, score in strategies.items():
-                r = simple_topn_returns(score, close, state_dates, top_n=top_n)
+                r = simple_topn_returns(score, close, state_dates, top_n=top_n, costs=BENCH_COSTS)
                 if len(r) and r.mean() > best_mean:
                     best, best_mean = name, r.mean()
             best_by_state[state] = best or "lowvol"
@@ -405,7 +411,7 @@ def _gru_returns(X: pd.DataFrame, close: pd.DataFrame, folds, top_n: int = 50,
                     preds[s] = float(net(torch.tensor(x[None]))[0])
                 score[d] = preds
         score_df = pd.DataFrame(score).T
-        all_rets.append(simple_topn_returns(score_df, close, rdates, top_n=top_n))
+        all_rets.append(simple_topn_returns(score_df, close, rdates, top_n=top_n, costs=BENCH_COSTS))
     return pd.concat(all_rets)
 
 
