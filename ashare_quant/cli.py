@@ -12,6 +12,15 @@ from .config import Config
 from .pipeline import download_universe
 from .universe import load_universe
 
+# `daily` 的退出码约定（2026-09-18 新增）：
+#   0 = 正常（含"确实没有新交易日"这种非故障的空转）
+#   2 = 数据侧故障：主备源全空 / 个股大面积没跟上 / 面板横截面塌缩 —— 已主动**不**出决策
+#   1 = 未捕获异常（traceback，由 Python 自己给）
+# 为什么要有 2：09-17 16:05 的计划任务三个指数源全空、数据停在 09-16，
+# 而 `Get-ScheduledTaskInfo` 的 LastTaskResult 仍是 0（旧代码只打印 ‼️ 就 return None）。
+# 失败必须能被操作系统看见，否则"计划任务一切正常"会和仪表盘一样撒同一个谎。
+EXIT_DATA_FAILURE = 2
+
 
 def _calendar(cfg: Config, store: ParquetStore) -> TradingCalendar:
     if store.symbols():
@@ -200,6 +209,55 @@ def _simulation_full_returns(close: pd.DataFrame, index_close: pd.Series,
     return out
 
 
+def _data_health(out: dict) -> dict:
+    """把"数据停在旧日期"量化，供 update_stats.json 与仪表盘判断是否告警。
+
+    days_behind = 指数截止日之后、本应已收盘确认的交易日数（不含周末）。
+    正常收盘后运行为 0；连续 >0 且 index_status 异常即为源故障。
+
+    另有个股口径（stocks_*）：**只看指数会漏报**——2026-09-16 指数已到 09-16，
+    5140/5360 只个股却停在 09-15，而这里照样输出 days_behind=0、healthy=true。
+    预期内的落后（真停牌 / 当日无 bar 的 no_data、以及今日冷却中的代码）由
+    update_daily 在 stocks_behind_expected 里扣除，不会误报成故障。
+    """
+    from .calendar import market_session
+    # 个股口径：指数到达 ≠ 个股到达；容差 = 预期外落后 ≤ max(10, 1% 股票数)
+    total = out.get("stocks_total")
+    n_behind = out.get("stocks_behind")
+    unexpected = out.get("stocks_behind_unexpected")
+    if unexpected is None and n_behind is not None:
+        unexpected = max(0, n_behind - (out.get("stocks_behind_expected") or 0))
+    stock: dict = {}
+    ok_stocks = True
+    if total and n_behind is not None:
+        ok_stocks = unexpected <= max(10, int(0.01 * total))
+        stock = {"stocks_total": total,
+                 "stocks_behind": n_behind,
+                 "stocks_behind_unexpected": unexpected,
+                 "completeness": out.get("completeness"),
+                 "stocks_ok": ok_stocks}
+    idx_date = out.get("new_index_date")
+    if not idx_date:
+        return {"days_behind": None, "healthy": False,
+                "index_status": out.get("index_status") or "no_index", **stock}
+    try:
+        start = (pd.Timestamp(idx_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return {"days_behind": None, "healthy": False,
+                "index_status": out.get("index_status"), **stock}
+    today = pd.Timestamp.today().normalize()
+    # 盘前/盘中/午间：当日尚未收盘确认，参考日不含今天；收盘后与周末以次日为参考
+    ref = today if market_session() in ("pre", "am", "lunch", "pm") else today + pd.Timedelta(days=1)
+    import numpy as np
+    behind = int(np.busday_count(start, ref.strftime("%Y-%m-%d")))
+    status = out.get("index_status")
+    return {"days_behind": max(behind, 0),
+            "healthy": status != "all_sources_empty" and behind <= 0 and ok_stocks,
+            "index_status": status,
+            "index_sources": out.get("index_sources"),
+            "primary_index_empty": out.get("primary_index_empty"), **stock}
+
+
 def cmd_daily(args) -> None:
     import json
     import time
@@ -224,6 +282,8 @@ def cmd_daily(args) -> None:
             "last_run": time.strftime("%Y-%m-%d %H:%M:%S"),
             "source": cfg.data_source,
             "index_date": out.get("new_index_date"),
+            **_data_health(out),
+            "error": out.get("error"),
             "updated": len(out.get("updated", [])),
             "up_to_date": (len(out["up_to_date"]) if isinstance(out.get("up_to_date"), list)
                            else out.get("up_to_date", 0)),
@@ -257,8 +317,25 @@ def cmd_daily(args) -> None:
     out = update_daily(codes, store, cfg)
     t1 = time.time()
     n_up = len(out["up_to_date"]) if isinstance(out["up_to_date"], list) else "all"
+    src = "、".join(out.get("index_sources") or []) or "无"
+    health = _data_health(out)
     print(f"指数截止={out['new_index_date']} 更新={len(out['updated'])} "
-          f"已最新={n_up} 失败={len(out['failed'])}", flush=True)
+          f"已最新={n_up} 失败={len(out['failed'])}（指数源：{src}）", flush=True)
+    if out.get("index_status") == "all_sources_empty":
+        # 主备源全部无返回 ≠ 已最新：以前这里会打印"数据已是最新交易日"，
+        # 于是行情源挂两天而 16:05 任务一直"成功"。现在显式失败并退出。
+        # 2026-09-18 补：**退出码也必须非 0**。此前这里只打印 ‼️ 然后 return，
+        # 计划任务拿到的仍是 exit=0 —— 09-17 16:05 那次三个指数源全空、数据停在
+        # 09-16，而 LastTaskResult 是 0，操作系统层面同样"看不见"这次失败。
+        print(f"‼️ {out.get('error')}", flush=True)
+        _write_stats(t0, t1, None, None, extra={"exit_code": EXIT_DATA_FAILURE})
+        return EXIT_DATA_FAILURE
+    if health.get("days_behind"):
+        print(f"‼️ 数据仍落后 {health['days_behind']} 个交易日"
+              f"（指数截止 {out['new_index_date']}），请检查数据源可用性。", flush=True)
+    if out.get("primary_index_empty"):
+        print(f"提示：主源 {cfg.data_source} 指数无返回，本次指数来自备源（{src}）；"
+              f"持续如此请把 config.yaml 的 data_source 换成可用源。", flush=True)
     if out.get("stale"):
         if out.get("cooldown_skipped"):
             print(f"有 {out['stale']} 只股票数据落后，但今日处于失败冷却"
@@ -275,10 +352,40 @@ def cmd_daily(args) -> None:
         print(f"无数据（可能停牌/未上市）：{len(out['no_data'])} 只，"
               f"如 {','.join(out['no_data'][:5])}…，已跳过今日", flush=True)
     if not out.get("new_data", True) and not args.force:
-        print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）", flush=True)
-        _write_stats(t0, t1, None, None)
-        return
+        if health.get("days_behind"):
+            print(f"本次没有新增行情（落后 {health['days_behind']} 个交易日），"
+                  f"跳过报告与决策重算；请先确认 data_source 可用，"
+                  f"或用 --force 按现有数据重算。", flush=True)
+            code = EXIT_DATA_FAILURE
+        elif not health.get("stocks_ok", True):
+            # 指数前进了、个股几乎没跟上：面板横截面会塌缩，绝不能在它上面出决策
+            print(f"‼️ 本次只有 {(out.get('completeness') or 0):.0%} 的股票拿到目标交易日 bar"
+                  f"（{out.get('stocks_behind')}/{out.get('stocks_total')} 只仍停在上一交易日），"
+                  f"疑似主备源均未发布当日行情；已跳过报告与决策重算"
+                  f"（--force 可按现有数据强制重算）。", flush=True)
+            code = EXIT_DATA_FAILURE
+        else:
+            # 真的没有新交易日（周末/节假日）：不是故障，别让计划任务报假警
+            print("数据已是最新交易日，跳过报告与决策重算（--force 可强制重算）", flush=True)
+            code = 0
+        _write_stats(t0, t1, None, None, extra={"exit_code": code})
+        return code
     panels = build_panels(store)
+    # 第二道门禁（实测，而非自述）：直接量刚拼出来的面板最后一日横截面。
+    # update_daily 的 completeness 是"文件被写过/个股拿到目标 bar"的自述口径，
+    # 与"面板实际有多少只有当日价格"是两件事；09-16 的塌缩正是在自述 healthy
+    # 的情况下发生的（见 AGENTS.md「已知问题」3）。
+    cov = panels.get("_coverage") or {}
+    if cov.get("collapsed"):
+        print(f"‼️ 面板最后一日横向塌缩：{cov['last_count']} 只有 {cov['last_date']} 的数据"
+              f"（近 10 日常态 {cov['normal_count']} 只，仅 {(cov.get('ratio') or 0):.0%}）；"
+              f"已跳过报告与决策重算，避免在塌缩横截面上出决策。"
+              f"请等数据源补齐后重跑（或先补齐数据再 --force）。", flush=True)
+        _write_stats(t0, t1, None, None,
+                     extra={"panel_coverage": cov, "panel_collapsed": True,
+                            "error": "panel_cross_section_collapsed",
+                            "exit_code": EXIT_DATA_FAILURE})
+        return EXIT_DATA_FAILURE
     t2 = time.time()
     print("阶段 2/3：生成报告与模拟盘（约 20 秒）…", flush=True)
     _build_html_report(cfg, store, args.out_dir, panels=panels)
@@ -296,7 +403,9 @@ def cmd_daily(args) -> None:
     print(f"当日报告已生成: {args.out_dir}/report.html")
     _write_stats(t0, t1, t2, t4,
                  extra={"report_sec": round(t3 - t2, 1),
-                        "decision_sec": round(t4 - t3, 1) if not args.no_decision else None})
+                        "decision_sec": round(t4 - t3, 1) if not args.no_decision else None,
+                        "panel_coverage": cov, "panel_collapsed": False, "exit_code": 0})
+    return 0
 
 
 def cmd_report(args) -> None:
@@ -341,7 +450,7 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
     import json
 
     from .ml.decision import decide, load_models, train_and_save
-    from .ml.features import build_dataset, load_feature_cache, save_feature_cache
+    from .ml.features import load_or_build_dataset
     from .pipeline import build_panels
 
     if panels is None:
@@ -355,12 +464,13 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
         store.save("sh000300", idx_df)
         index_close = idx_df["close"]
     cache_path = Path(cfg.data_root) / "features.parquet"
-    cached = load_feature_cache(cache_path, close.index.max())
-    if cached is not None:
-        X_all, y_all = cached
-    else:
-        X_all, y_all = build_dataset(close, volume, index_close, horizon=20, require_target=False)
-        save_feature_cache(X_all, y_all, cache_path, close.index.max())
+    # 特征缓存按"面板内容指纹"校验：只比 as_of 日期会让"横截面塌缩/数值修正后
+    # 日期没变"的旧表被复用（2026-09-16 事故：决策在 204 只的塌缩特征上重算）。
+    # horizon 同时决定"标签跨度"与训练集的 embargo 宽度，两处必须是同一个常量。
+    horizon = 20
+    X_all, y_all = load_or_build_dataset(close, volume, index_close, cache_path,
+                                         horizon=horizon, require_target=False,
+                                         target_mode=getattr(cfg, "target_mode", "raw"))
     ok = y_all.notna()
     X, y = X_all[ok], y_all[ok]
     model_dir = Path(model_dir)
@@ -380,7 +490,7 @@ def _save_decision(cfg, store, model_dir, sample_size: int, retrain: bool,
             ("lgbm", "histgb", "rf", "svm", "knn", "linear")
         train_and_save(X, y, model_dir, model_names=model_names,
                        sample_size=sample_size,
-                       as_of=close.index.max())
+                       as_of=close.index.max(), horizon=horizon)
     loaded = load_models(model_dir)
     last_date = X_all.index.get_level_values("date").max()
     picks = decide(loaded, X_all, close, last_date, top_n=cfg.top_n)
@@ -479,7 +589,11 @@ def main(argv=None) -> None:
     dc.add_argument("--retrain", action="store_true")
     dc.set_defaults(func=cmd_decision)
     args = p.parse_args(argv)
-    args.func(args)
+    code = args.func(args)
+    # 子命令返回非 0 表示"数据侧故障、已主动不出决策"（见 EXIT_DATA_FAILURE）。
+    # 计划任务据此把 LastTaskResult 记成失败，失败才不会被"成功"掩盖。
+    if isinstance(code, int) and code != 0:
+        raise SystemExit(code)
 
 
 if __name__ == "__main__":
