@@ -9,6 +9,8 @@ from __future__ import annotations
 import requests
 import pandas as pd
 
+from ..venues import volume_in_shares
+
 _COLS = ["open", "high", "low", "close", "volume", "amount"]
 _UA = {"User-Agent": "Mozilla/5.0"}
 _KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
@@ -28,8 +30,13 @@ def to_tx_code(symbol: str) -> str:
     return "bj" + s
 
 
-def _parse_kline(rows: list[list]) -> pd.DataFrame:
-    """腾讯 K 线行 [date, open, close, high, low, volume] → 标准面板。"""
+def _parse_kline(rows: list[list], code: str) -> pd.DataFrame:
+    """腾讯 K 线行 [date, open, close, high, low, volume] → 标准面板。
+
+    ``code`` 必须传：**科创板（688/689）的成交量单位是"股"，其余板块是"手"**，
+    无条件 ×100 会把科创板放大 100 倍（2026-09-16/17 的 688 数据即由此污染）。
+    口径定义见 ``ashare_quant.venues.volume_in_shares``。
+    """
     if not rows:
         return pd.DataFrame(columns=_COLS)
     # 部分行带第 7 列分红信息 dict，只取前 6 列
@@ -38,7 +45,8 @@ def _parse_kline(rows: list[list]) -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"])
     for c in ("open", "close", "high", "low", "volume"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df["volume"] = df["volume"] * 100  # 手 → 股
+    if not volume_in_shares(code):
+        df["volume"] = df["volume"] * 100  # 手 → 股
     df["amount"] = (df["volume"] * df["close"]).astype(float)  # 成交额估算
     return df.set_index("date")[_COLS].sort_index()
 
@@ -56,7 +64,7 @@ def _kline(symbol: str, start: str, end: str, adjust: str) -> pd.DataFrame:
         return pd.DataFrame(columns=_COLS)
     data = data["data"][symbol]
     key = f"{adjust}day" if f"{adjust}day" in data else "day"
-    return _parse_kline(data.get(key, []))
+    return _parse_kline(data.get(key, []), symbol)
 
 
 def _fetch_batched(symbol: str, start: str, end: str, adjust: str) -> pd.DataFrame:
