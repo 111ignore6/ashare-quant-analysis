@@ -16,14 +16,36 @@ def train_and_save(X: pd.DataFrame, y: pd.Series, out_dir: Path,
                    model_names=("lgbm", "histgb", "rf", "svm", "knn", "linear"),
                    sample_size: int = 60000, calib_months: int = 3,
                    alpha: float = 0.5, svm_sample_cap: int = 20000,
-                   calib_sample_cap: int = 30000, as_of=None) -> dict:
-    """在全部历史上训练若干模型；最后 calib_months 作为校准期计算残差阈值。"""
+                   calib_sample_cap: int = 30000, as_of=None,
+                   horizon: int = 20, compute_thresholds: bool = False) -> dict:
+    """在历史上训练若干模型；最后 calib_months 作为校准期（阈值可选）。
+
+    **训练集与校准期之间留 embargo（2026-09-18 修，见 AGENTS.md 算法问题⑤）**：
+    target 是"未来 horizon 日收益"，相邻交易日的标签窗口彼此重叠。旧实现把训练集一直
+    取到 `calib_cut` 前一天，于是训练标签会**伸进校准期**（最多 horizon 个交易日）——
+    校准期的"样本外残差"因此偏乐观，而它正是 `thresholds` 的度量口径。现在训练集右端
+    再往前退 horizon 个交易日（这一段的标签两边都不用，即 purged/embargo 的标准做法），
+    `meta["embargo_days"]` 记录实际留出的交易日数。
+
+    **thresholds 默认不再计算（2026-09-18，见算法问题⑥）**：`thresholds` 从写进
+    `decision.json` / 账户历史起就没有任何消费方（全代码 0 处读取），而它每轮要为每个
+    模型各预测最多 `calib_sample_cap` 行。字段保留（schema 不变，默认 `{}`），
+    真要用时传 `compute_thresholds=True`。
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    dates = X.index.get_level_values("date").unique()
-    calib_cut = dates[-int(21 * calib_months):][0] if len(dates) > 21 * calib_months else dates[0]
-    train_mask = X.index.get_level_values("date") < calib_cut
-    calib_mask = X.index.get_level_values("date") >= calib_cut
+    dates = pd.Index(X.index.get_level_values("date").unique()).sort_values()
+    n_calib = int(21 * calib_months)
+    calib_cut = dates[-n_calib] if len(dates) > n_calib else dates[0]
+    # 标签窗口 = (d, d+horizon]，所以"标签不越过校准期"要求 d 比 calib_cut 至少早
+    # horizon+1 个交易日；等价于训练集右端退到 dates[pos - horizon] 之前。
+    pos = int(dates.get_loc(calib_cut))
+    train_cut_pos = max(0, pos - max(0, int(horizon)))
+    train_cut = dates[train_cut_pos]
+    embargo_days = int(pos - train_cut_pos)
+    day = X.index.get_level_values("date")
+    train_mask = day < train_cut
+    calib_mask = day >= calib_cut
     idx = np.flatnonzero(train_mask)
     if len(idx) > sample_size:
         idx = np.random.default_rng(0).choice(idx, sample_size, replace=False)
@@ -37,16 +59,19 @@ def train_and_save(X: pd.DataFrame, y: pd.Series, out_dir: Path,
         else:
             model.fit(Xtr, ytr)
         joblib.dump(model, out_dir / f"{name}.joblib")
-        calib_idx = np.flatnonzero(calib_mask)
-        if len(calib_idx) > calib_sample_cap:
-            calib_idx = np.random.default_rng(1).choice(
-                calib_idx, calib_sample_cap, replace=False)
-        if len(calib_idx):
-            resid = np.abs(model.predict(X.iloc[calib_idx]) - y.iloc[calib_idx].values)
-            thresholds[name] = float(np.quantile(resid, 1 - alpha))
+        if compute_thresholds:
+            calib_idx = np.flatnonzero(calib_mask)
+            if len(calib_idx) > calib_sample_cap:
+                calib_idx = np.random.default_rng(1).choice(
+                    calib_idx, calib_sample_cap, replace=False)
+            if len(calib_idx):
+                resid = np.abs(model.predict(X.iloc[calib_idx]) - y.iloc[calib_idx].values)
+                thresholds[name] = float(np.quantile(resid, 1 - alpha))
     meta = {
         "models": list(model_names),
         "thresholds": thresholds,
+        "horizon": int(horizon),
+        "embargo_days": embargo_days,
         "trained_on": (str(pd.Timestamp(as_of).date())
                        if as_of is not None else str(dates.max().date())),
         "alpha": alpha,
