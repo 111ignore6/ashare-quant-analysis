@@ -1,0 +1,119 @@
+# A股量化研究·模拟分析控制台 —— Streamlit 主题配置（浅色 / 深色可切换）
+#
+# 设计意图：接近专业行情/研究终端，而不是 Streamlit 默认的“演示页”观感。
+#
+# 【怎么改才对】两张模式表 [theme.light] / [theme.dark] 必须成对存在，用户才能
+# 在设置菜单里切主题。可放进子表的键 = 52 个 theme 选项里的 42 个；
+# 下面这 10 个只能放全局 [theme]（放子表里会无效）：
+#   base, baseFontSize, baseFontWeight, fontFaces,
+#   metricValueFontSize, metricValueFontWeight, showSidebarBorder,
+#   chartCategoricalColors, chartSequentialColors, chartDivergingColors
+# （该清单实测自本机 streamlit/config.py 的 _create_theme_options 调用，
+#   不是照文档记忆写的；注意后 3 个图色板也属于全局项。）
+#
+# 【A 股口径】红=涨/正收益，绿=跌/负收益（与欧美默认相反）。两个模式都守这条。
+#   注意不要靠交换 redColor/greenColor 实现红涨绿跌 —— 那会把 st.error 也变绿。
+#   指标方向色由 dashboard.py 的 KPI 卡片负责：kpi_row() 按数值正负加
+#   .kpi-value.up / .kpi-value.down 类，配合同名主题色解析出的 --up / --down。
+#   dashboard.py 的自绘组件与 plotly 图表吃它自己那套令牌（见该文件 THEMES），
+#   因为实测 Streamlit 不向外暴露任何 CSS 变量可用（全站样式表里除本 app 自己
+#   注入的 --xxx 外一个都没有），没法从主题色派生。
+
+[theme]
+# —— 只能放全局的项 ——
+base = "light"
+baseFontSize = 15
+metricValueFontSize = "1.6rem"
+metricValueFontWeight = 700
+showSidebarBorder = true
+
+# —— 两个模式共用的形状/字体（放全局即对明暗都生效）——
+baseRadius = "0.7rem"
+buttonRadius = "0.55rem"
+showWidgetBorder = true
+font = "Inter, Segoe UI, Microsoft YaHei, PingFang SC, Hiragino Sans GB, Noto Sans CJK SC, sans-serif"
+headingFont = "Inter, Segoe UI, Microsoft YaHei, PingFang SC, Hiragino Sans GB, Noto Sans CJK SC, sans-serif"
+codeFont = "JetBrains Mono, Consolas, Microsoft YaHei, monospace"
+
+# —— 图表分类色板（与 dashboard.py::CHART_COLORS 同步；全局项，不可放子表）——
+chartCategoricalColors = [
+    "#1d4ed8", "#0f9960", "#d92b2b", "#b45309", "#7c3aed",
+    "#0891b2", "#64748b", "#be185d", "#4d7c0f", "#a16207",
+]
+chartDivergingColors = [
+    "#0f9960", "#4ade80", "#bbf7d0", "#f8fafc", "#fecaca",
+    "#f87171", "#ef4444", "#dc2626", "#b91c1c", "#7f1d1d",
+]
+
+# ============================================================ 浅色模式
+[theme.light]
+primaryColor = "#1d4ed8"             # 主色：按钮、选中态、焦点环
+backgroundColor = "#f5f7fa"          # 页面底色（浅灰蓝）
+secondaryBackgroundColor = "#ffffff" # 卡片 / 控件底色
+textColor = "#0f172a"                # 正文（slate-900，对比度 > 15:1）
+linkColor = "#1d4ed8"
+borderColor = "#e3e8ef"
+
+redColor = "#d92b2b"                 # 涨 / 正收益（A股习惯）
+greenColor = "#0f9960"               # 跌 / 负收益
+blueColor = "#1d4ed8"
+yellowColor = "#d97706"
+orangeColor = "#ea580c"
+violetColor = "#7c3aed"
+grayColor = "#64748b"
+
+codeBackgroundColor = "#f8fafc"
+dataframeHeaderBackgroundColor = "#f8fafc"
+dataframeBorderColor = "#e6eaf2"
+
+[theme.light.sidebar]
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f8fafc"
+borderColor = "#e3e8ef"
+
+# ============================================================ 深色模式
+[theme.dark]
+primaryColor = "#4c8dff"             # 深底上要提亮，否则主色发闷
+backgroundColor = "#0d1117"          # 页面底色（近黑，带一点蓝）
+secondaryBackgroundColor = "#161b22" # 卡片 / 控件底色（与页面拉开层次）
+textColor = "#e6edf3"                # 正文
+linkColor = "#79b8ff"
+borderColor = "#262c36"
+
+redColor = "#f85149"                 # 涨 / 正收益（深底上提亮，口径不变）
+greenColor = "#3fb950"               # 跌 / 负收益
+blueColor = "#4c8dff"
+yellowColor = "#e3b341"
+orangeColor = "#ff9e64"
+violetColor = "#a78bfa"
+grayColor = "#8b949e"
+
+codeBackgroundColor = "#161b22"
+dataframeHeaderBackgroundColor = "#1b222c"
+dataframeBorderColor = "#262c36"
+
+[theme.dark.sidebar]
+backgroundColor = "#0d1117"
+secondaryBackgroundColor = "#161b22"
+borderColor = "#262c36"
+
+[client]
+# "viewer" = 隐藏开发者选项，但**保留 ⋯ 设置菜单**（主题切换器就在里面）。
+# ⚠️ 不要改回 "minimal"：官方语义是"没有剩余选项就隐藏整个菜单"，
+#    实测会把 ⋯ 菜单一起藏掉（stMainMenu / stToolbar 节点直接消失）→ 用户切不到主题。
+#    想藏的是 Deploy 等入口，"viewer" 已经做到。
+toolbarMode = "viewer"
+showErrorDetails = true
+showSidebarNavigation = false
+
+# ⚠️ 千万不要在这里设 [server] headless = true（2026-09-16 的回归，已修）
+# Streamlit 的 headless=true 语义是"不要自动打开浏览器"。本文件是全局配置，
+# 一设就会把 scripts\start.ps1 与 scripts\start_dashboard.ps1 的自动弹浏览器一起掐掉
+# （它们自己不传 --server.headless，所以改造前能弹、加了本文件后弹不出来，
+# 表现为"点了仪表盘没反应，得手动输 http://localhost:8501"）。
+# 需要 headless 的只有截图/CI 场景，那种场合请在命令行显式传 --server.headless true：
+# scripts\launch_all.ps1 就是这么做的（命令行参数优先于本文件），因此本文件不设该项。
+# tests/test_dashboard_smoke.py::test_streamlit_config_regressions 会守住这条。
+
+[browser]
+gatherUsageStats = false
