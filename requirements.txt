@@ -9,6 +9,6 @@ plotly
 pyarrow
 PyYAML
 streamlit-autorefresh
-easyquotation
+requests
 mootdx
 pytest
