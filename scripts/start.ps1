@@ -68,7 +68,10 @@ function Start-Dashboard {
     $existing = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($existing) {
-        Write-Host "仪表盘已在运行：http://localhost:8501（无需重复启动）" -ForegroundColor Green
+        Write-Host "仪表盘已在运行：http://localhost:8501，正在打开浏览器…" -ForegroundColor Green
+        # ⚠️ 这里必须也开浏览器：否则用户选了「6) 启动仪表盘」，因为端口已占用而直接
+        # return，界面上什么都不弹，只能自己输网址（2026-09-16 用户实际遇到的第二种情形）。
+        Start-Process "http://localhost:8501"
         return
     }
     Invoke-Step "启动仪表盘（http://localhost:8501，Ctrl+C 停止）" {
