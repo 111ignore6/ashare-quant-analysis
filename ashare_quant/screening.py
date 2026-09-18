@@ -15,6 +15,29 @@ def split_dates(dates, train_frac: float = 0.67):
     return dates[:cut], dates[cut:]
 
 
+# 等权全市场基准的成分股覆盖度守卫阈值（与仪表盘 equal_weight_bench 同口径）
+BENCH_MIN_COVERAGE = 0.5
+
+
+def covered_dates(close: pd.DataFrame, dates, min_ratio: float = BENCH_MIN_COVERAGE):
+    """剔除横截面塌缩的日期：有效成分股 < 全天候常态的 ``min_ratio``。
+
+    2026-09-16 实测：等权全市场基准曾在"最后一行只有 209/5360 只"时算出 **-57%
+    假暴跌**（当日均值 12.01 元 vs 前一日 28.27 元）。同一类受害者在月频基准里
+    同样成立 —— 一个月频观测被污染就足以改变夏普与"是否跑赢基准"的判断。
+    面板本身有更上游的守卫（``pipeline.panel_coverage``：塌缩面板不落盘、不出决策），
+    这里是消费侧的独立一道。
+    """
+    ds = list(dates)
+    if close is None or close.empty or not ds:
+        return ds
+    counts = close.notna().sum(axis=1)
+    normal = float(counts.median())
+    if normal <= 0:
+        return ds
+    return [d for d in ds if float(counts.get(d, 0)) >= min_ratio * normal]
+
+
 def walk_forward_folds(dates, train_months: int = 18, valid_months: int = 6,
                        step_months: int = 6):
     """按自然月切出多折训练/样本外验证区间，滚动前进。"""
@@ -91,11 +114,18 @@ def run_screening(close: pd.DataFrame, volume: pd.DataFrame,
     bench_close = benchmark_close.reindex(close.index)
     valid_rdates = sorted({d for _, va in folds for d in monthly_rebalance_dates(va)})
     # 决策基准：等权全市场（与策略"等权选股"同口径）
-    bench_monthly = close.loc[valid_rdates].pct_change(fill_method=None).mean(axis=1).dropna()
+    # 覆盖度守卫：塌缩日期（有效成分股远少于常态）会算出假暴跌，必须先剔除；
+    # 被剔除的日期之后，相邻保留日的收益自然跨过该缺口（比塞一个假 -57% 诚实）。
+    bench_dates = covered_dates(close, valid_rdates)
+    dropped = len(valid_rdates) - len(bench_dates)
+    bench_monthly = close.loc[bench_dates].pct_change(fill_method=None).mean(axis=1).dropna()
     bm = metrics_from_returns(bench_monthly, periods_per_year=12)
+    bench_reason = "决策基准：等权全市场月收益（walk-forward 验证段）"
+    if dropped:
+        bench_reason += f"；已剔除 {dropped} 个成分股覆盖不足的交易日"
     rows.append({"model": "benchmark(等权全市场)", "params": "-", "sharpe": bm["sharpe"],
                  "max_drawdown": bm["max_drawdown"], "keep": True,
-                 "reason": "决策基准：等权全市场月收益（walk-forward 验证段）"})
+                 "reason": bench_reason})
     csi = metrics_from_returns(bench_close.loc[valid_rdates].pct_change(fill_method=None).dropna(),
                                periods_per_year=12)
     rows.append({"model": "benchmark(沪深300)", "params": "-", "sharpe": csi["sharpe"],

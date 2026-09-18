@@ -95,6 +95,66 @@ def _manifest_fingerprint(manifest: dict) -> str:
     ).hexdigest()
 
 
+# 面板最后一日有效成分股 < 近期常态的该比例 ⇒ 判定为"横截面塌缩"（数据只到一半）
+PANEL_MIN_COVERAGE_RATIO = 0.5
+
+
+def panel_coverage(panels: dict, lookback: int = 10) -> dict:
+    """实测面板横截面覆盖率：最后一日有效股票数 vs 近 ``lookback`` 日的中位数。
+
+    为什么必须实测面板（而不是信 ``update_daily`` 的 ``completeness``）：
+    2026-09-16 的塌缩是"指数已到 09-16、96% 个股停在 09-15"，而每天的放行判据
+    用的是 update_daily **自述**的 completeness(≥0.5)，**从没校验过真正被决策与
+    仪表盘消费的面板**；两者在"文件被重写但数据没前进一天"这类场景下会背离
+    （项目的工程约定「自述指标必须与实测对撞，不能自证」正是这条）。
+    """
+    close = panels.get("close")
+    empty = {"last_date": None, "last_count": 0, "normal_count": 0,
+             "ratio": None, "collapsed": False, "has_norm": False}
+    if close is None or close.empty:
+        return empty
+    counts = close.notna().sum(axis=1)
+    last = int(counts.iloc[-1])
+    prev = counts.iloc[-(lookback + 1):-1]
+    # 历史不足 5 天（新库/小样本）时不判定，避免误伤
+    if len(prev) < 5:
+        return {**empty, "last_date": str(close.index[-1].date()), "last_count": last}
+    normal = int(prev.median())
+    ratio = (last / normal) if normal > 0 else None
+    # 判定条件（缺一不可，避免误伤）：
+    #   1) 有足够历史建立"常态"（≥5 天，见上）；
+    #   2) 常态规模 ≥ 20 只 —— 更小的新建库/自选股实验不做判定；
+    #   3) 最后一日不足常态的一半，且绝对缺口 ≥ 10 只 —— 既排除小样本抖动，
+    #      也排除"少数真停牌/未上市"（那通常只有个位数）。
+    collapsed = bool(normal >= 20 and (normal - last) >= 10
+                     and last < PANEL_MIN_COVERAGE_RATIO * normal)
+    return {"last_date": str(close.index[-1].date()), "last_count": last,
+            "normal_count": normal,
+            "ratio": None if ratio is None else round(ratio, 4),
+            "collapsed": collapsed, "has_norm": True}
+
+
+def _source_signature(store: ParquetStore) -> str:
+    """源数据签名 = manifest 指纹 + 每个个股 parquet 的 (mtime_ns, size)。
+
+    为什么 manifest 指纹不够：manifest 只记 start/end/rows，**值被改写而日期不变**
+    时指纹完全相同。2026-09-18 修复科创板 volume 时实测：改了 604 个 parquet 的
+    数值、日期一行没变 → manifest 指纹与面板 last_date 都没变 → 面板缓存被判有效
+    → `daily --force --retrain` 实际用的仍是被污染的特征（features 指纹一字未变）。
+    加 mtime/size 后，任何"文件被重写"（哪怕日期不变）都会让缓存失效。
+    代价：5000+ 次 os.stat，实测约 0.6 秒（面板重建是 25 秒量级）。
+    """
+    h = hashlib.sha256()
+    h.update(_manifest_fingerprint(store.read_manifest()).encode())
+    for sym in store.symbols():
+        try:
+            st = (store.root / f"{sym}.parquet").stat()
+        except OSError:
+            continue
+        h.update(f"{sym}:{st.st_mtime_ns}:{st.st_size};".encode())
+    return h.hexdigest()
+
+
 def _load_panel_cache(store: ParquetStore, index_symbol: str):
     """数据未变化时直接读合并缓存，秒级返回。"""
     cache_dir = store.root / "panels"
@@ -115,10 +175,15 @@ def _load_panel_cache(store: ParquetStore, index_symbol: str):
     idx_end = store.read_manifest().get(index_symbol, {}).get("end")
     if not idx_end or str(meta.get("last_date", "")) != str(idx_end):
         return None
+    # 值被改写而日期不变（手工数据修复）时上面两条都拦不住 → 比对源数据签名。
+    # 旧 meta 没有该字段 → 一律视为失效（fail-safe：宁可重建 25 秒，
+    # 也不能拿滞后/被污染的面板出决策）。
+    if meta.get("source_signature") != _source_signature(store):
+        return None
     def _read(name: str) -> pd.DataFrame:
         return pd.read_parquet(cache_dir / f"{name}.parquet")
     try:
-        return {
+        cached = {
             "close": _read("close"),
             "volume": _read("volume"),
             "open": _read("open"),
@@ -126,9 +191,25 @@ def _load_panel_cache(store: ParquetStore, index_symbol: str):
         }
     except (FileNotFoundError, ValueError, OSError):
         return None
+    # 第二道：即便缓存是历史遗留/手工放的，也要确认它的最后一日没有塌缩
+    # （写入侧已拒绝塌缩面板，这里防的是"更早版本写下的坏缓存"）。
+    coverage = panel_coverage(cached)
+    if coverage["collapsed"]:
+        return None
+    cached["_coverage"] = coverage
+    return cached
 
 
-def _save_panel_cache(store: ParquetStore, index_symbol: str, panels: dict) -> None:
+def _save_panel_cache(store: ParquetStore, index_symbol: str, panels: dict) -> dict:
+    """写面板缓存；**塌缩的面板不落盘**（返回 coverage 供调用方判断）。
+
+    塌缩面板一旦落盘，仪表盘（直接读 ``panels/close.parquet``）会拿它显示一整天，
+    任何"按日取全市场均值"的下游都会算出假暴跌 —— 所以宁可不缓存（代价是下次
+    重建 ~25s），也不把坏面板留给消费方。返回的 ``coverage`` 再交给调用方做门禁。
+    """
+    coverage = panel_coverage(panels)
+    if coverage["collapsed"]:
+        return coverage
     cache_dir = store.root / "panels"
     cache_dir.mkdir(parents=True, exist_ok=True)
     for name in ("close", "volume", "open"):
@@ -139,9 +220,12 @@ def _save_panel_cache(store: ParquetStore, index_symbol: str, panels: dict) -> N
         "index_symbol": index_symbol,
         "fingerprint": _manifest_fingerprint(store.read_manifest()),
         "last_date": str(panels["close"].index.max().date()),
+        "source_signature": _source_signature(store),
+        "coverage": coverage,
     }
     (cache_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return coverage
 
 
 def build_panels(store: ParquetStore, index_symbol: str = "sh000300",
@@ -150,6 +234,9 @@ def build_panels(store: ParquetStore, index_symbol: str = "sh000300",
 
     每只股票只读一次（并行 IO），同时取出 open/close/volume，
     避免下游再逐只重读缓存文件；数据未变化时直接读合并缓存。
+
+    返回值里额外带一个私有键 ``_coverage``（``panel_coverage`` 的实测结果），
+    调用方据此判断"最后一日横截面是否塌缩"；其余键与原先一致。
     """
     if use_cache:
         cached = _load_panel_cache(store, index_symbol)
@@ -172,9 +259,11 @@ def build_panels(store: ParquetStore, index_symbol: str = "sh000300",
     index_close = idx["close"].sort_index() if idx is not None else pd.Series(dtype=float)
     panels = {"close": close, "volume": volume, "open": open_,
               "index_close": index_close}
+    coverage = panel_coverage(panels)
+    panels["_coverage"] = coverage
     if use_cache and len(symbols) >= 10:
         try:
-            _save_panel_cache(store, index_symbol, panels)
+            _save_panel_cache(store, index_symbol, panels)   # 塌缩面板不会落盘
         except OSError:
             pass
     return panels

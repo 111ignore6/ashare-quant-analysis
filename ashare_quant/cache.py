@@ -48,6 +48,20 @@ class ParquetStore:
         old = self.load(symbol)
         merged = df if old is None else pd.concat([old, df])
         merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+        # 内容没变就**不写盘**（2026-09-18 修）：`daily` 每次都会
+        # `store.append(index_symbol, idx_df)`，即使指数没有新交易日，旧写法也会重写
+        # 指数 parquet → mtime/size 变化 → `pipeline._source_signature` 随之变化
+        # → 面板缓存**每次运行都判失效**（重建 ~25 秒）、特征表也跟着重建
+        # （实测 17:20 与 18:01 两次运行都打印"本次重建特征表"，而面板内容完全一致）。
+        # 只比"内容"不比"是否调用过"：真正的数值/行数变化仍会写盘 → 签名照样变化，
+        # 判据强度不变（这正是 source_signature 存在的理由）。
+        if old is not None and old.equals(merged):
+            # 内容没变 → 不碰 parquet（保住 mtime，缓存判据才不会被自己刷失效）。
+            # 但 manifest 仍要保证是最新的：手工删过 manifest.json 时，
+            # 这里若不补写，指数就会永远缺 manifest 条目（下游按 manifest 判日期）。
+            if update_manifest:
+                self.update_manifest(symbol, merged)
+            return
         self.save(symbol, merged, update_manifest=update_manifest)
 
     def exists(self, symbol: str) -> bool:

@@ -56,3 +56,22 @@ def test_evaluate_metrics():
     tr, va = split_dates(close.index)
     m = evaluate(MomentumModel(20), close, volume, va, top_n=10)
     assert "sharpe" in m and "max_drawdown" in m
+
+
+def test_covered_dates_drops_collapsed_days():
+    """等权全市场基准必须剔除横截面塌缩的日期（09-16 曾据此算出 -57% 假暴跌）。
+
+    月频基准同样受伤：一个月频观测被污染就足以改变夏普与"是否跑赢基准"的判断。
+    """
+    from ashare_quant.screening import covered_dates
+
+    idx = pd.date_range("2024-01-02", periods=6, freq="B")
+    close = pd.DataFrame({f"{i:06d}": [10.0] * 6 for i in range(40)}, index=idx)
+    collapsed_day = idx[4]
+    close.loc[collapsed_day, [f"{i:06d}" for i in range(3, 40)]] = float("nan")
+
+    kept = covered_dates(close, list(idx))
+    assert collapsed_day not in kept
+    assert len(kept) == 5
+    # 覆盖正常时一天都不剔除
+    assert covered_dates(close.fillna(10.0), list(idx)) == list(idx)
