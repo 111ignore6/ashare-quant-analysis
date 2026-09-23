@@ -1,4 +1,5 @@
 import pandas as pd
+
 from ashare_quant.cache import ParquetStore
 from ashare_quant.config import Config
 from ashare_quant.daily import last_trading_day, needs_update, update_daily

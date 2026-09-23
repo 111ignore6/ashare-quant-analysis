@@ -42,7 +42,7 @@ class Config:
     auto_update: bool = True
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Config":
+    def from_dict(cls, d: dict) -> Config:
         names = {f.name for f in fields(cls)}
         kwargs = {k: v for k, v in d.items() if k in names}
         if "data_root" in kwargs:
@@ -58,7 +58,7 @@ class Config:
         return out
 
     @classmethod
-    def from_yaml(cls, path: Path) -> "Config":
+    def from_yaml(cls, path: Path) -> Config:
         path = Path(path)
         if path.exists():
             with path.open(encoding="utf-8") as f:

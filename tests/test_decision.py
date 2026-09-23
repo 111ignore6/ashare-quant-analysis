@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+
 from ashare_quant.ml.decision import decide, load_models, train_and_save
 from ashare_quant.ml.features import build_dataset
 

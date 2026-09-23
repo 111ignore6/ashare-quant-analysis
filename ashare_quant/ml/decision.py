@@ -89,7 +89,7 @@ def load_models(out_dir: Path) -> dict:
         path = out_dir / f"{name}.joblib"
         try:
             models[name] = joblib.load(path)
-        except Exception as exc:  # noqa: BLE001 - 包装为可操作的调度错误
+        except Exception as exc:
             # 历史上遇到：xgboost.dll 缺失导致 xgb.joblib 加载失败，整个
             # 每日决策阶段崩溃且日志只有深层 pickle traceback，无法定位。
             # 保持 fail-fast（决策不允许悄悄缺模型），但给出明确修复路径。

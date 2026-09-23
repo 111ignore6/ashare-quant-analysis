@@ -36,9 +36,14 @@ from streamlit_autorefresh import st_autorefresh
 
 from ashare_quant.account import account_snapshot
 from ashare_quant.config import update_config_yaml
-from ashare_quant.portfolio import (account_basis, build_trade_ledger,
-                                    costs_from_config, load_history,
-                                    monthly_returns_table, recompute_account)
+from ashare_quant.portfolio import (
+    account_basis,
+    build_trade_ledger,
+    costs_from_config,
+    load_history,
+    monthly_returns_table,
+    recompute_account,
+)
 from ashare_quant.realtime import index_snapshot, snapshot
 
 PROJECT = Path(__file__).parent
@@ -1345,7 +1350,7 @@ with tab_decision:
                 diff_rows.append({"代码": s, "变化": "✅ 持有", "当前权重": p.get("weight"),
                                   "预期收益(20日)": p.get("score"), "_score": p.get("score")})
             order = {"🆕 新增": 0, "➖ 卖出": 1, "✅ 持有": 2}
-            diff_rows.sort(key=lambda r: (order[r["变化"]], -((r["_score"] or 0))))
+            diff_rows.sort(key=lambda r: (order[r["变化"]], -(r["_score"] or 0)))
             for row in diff_rows:
                 row.pop("_score", None)
             kpi_row([

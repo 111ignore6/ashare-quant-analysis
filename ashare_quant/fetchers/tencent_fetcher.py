@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-import requests
 import pandas as pd
+import requests
 
 from ..venues import volume_in_shares
 

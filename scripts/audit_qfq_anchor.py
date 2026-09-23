@@ -26,9 +26,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ashare_quant.cache import ParquetStore                       # noqa: E402
-from ashare_quant.config import Config                            # noqa: E402
-from ashare_quant.fetchers import get_source                      # noqa: E402
+from ashare_quant.cache import ParquetStore  # noqa: E402
+from ashare_quant.config import Config  # noqa: E402
+from ashare_quant.fetchers import get_source  # noqa: E402
 
 TOL = 0.001  # 0.1%：超过即认为锚点不同（分红缩放）
 

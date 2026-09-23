@@ -46,7 +46,11 @@ def run_backtest(score: pd.DataFrame, close: pd.DataFrame, open_: pd.DataFrame,
         picks = score.loc[d].dropna().nlargest(top_n).index.tolist()
         prev_close = close.shift(1).loc[exec_day]
 
-        def px(symbol):
+        # 显式把本轮变量绑成默认参数（B023）：px 目前只在**本次迭代内**同步调用
+        # （下面第 58/72/73/77/88 行），所以闭包捕获其实是安全的；但那样写一旦有人
+        # 把 px 存起来延后调用，就会静默拿到下一轮的 exec_day/prev_close。
+        # 绑成默认参数后，语义与调用点无关，不会再随重构变成 bug。
+        def px(symbol, exec_day=exec_day, prev_close=prev_close):
             p = open_.loc[exec_day, symbol]
             if pd.isna(p):
                 p = prev_close[symbol]

@@ -7,8 +7,8 @@
 """
 
 import pytest
-from ashare_quant.realtime import (INDEX_CODES, RealtimeError, _prefix, index_snapshot,
-                                   snapshot)
+
+from ashare_quant.realtime import INDEX_CODES, RealtimeError, _prefix, index_snapshot, snapshot
 
 
 def _tencent_line(prefixed: str, name: str, now: float, prev: float,

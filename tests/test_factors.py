@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+
 from ashare_quant.research.factors import compute_factors, winsorize_zscore
 
 

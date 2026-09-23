@@ -1,8 +1,15 @@
 import numpy as np
 import pandas as pd
+
 from ashare_quant.models.candidates import MomentumModel, ReversalModel
-from ashare_quant.screening import (evaluate, grid_search, run_screening, split_dates,
-                                    walk_forward_evaluate, walk_forward_folds)
+from ashare_quant.screening import (
+    evaluate,
+    grid_search,
+    run_screening,
+    split_dates,
+    walk_forward_evaluate,
+    walk_forward_folds,
+)
 
 
 def _panel():

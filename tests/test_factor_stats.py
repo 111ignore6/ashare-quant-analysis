@@ -1,7 +1,13 @@
 import numpy as np
 import pandas as pd
-from ashare_quant.research.factor_stats import (cross_sectional_ic, factor_report,
-                                                forward_returns, layer_returns, stability_by_year)
+
+from ashare_quant.research.factor_stats import (
+    cross_sectional_ic,
+    factor_report,
+    forward_returns,
+    layer_returns,
+    stability_by_year,
+)
 
 
 def _momentum_panel():

@@ -1,6 +1,7 @@
 import sys
 
 import pandas as pd
+
 from ashare_quant.fetchers import akshare_fetcher
 
 

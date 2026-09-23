@@ -1,4 +1,5 @@
 import pandas as pd
+
 from ashare_quant.calendar import TradingCalendar
 from ashare_quant.validation import validate_symbol
 

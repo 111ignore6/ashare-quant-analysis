@@ -1,4 +1,5 @@
 import pandas as pd
+
 from ashare_quant.research.report import build_report, conclusions
 
 

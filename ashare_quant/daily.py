@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import sys
-from concurrent.futures import ThreadPoolExecutor
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 from tqdm import tqdm
@@ -299,7 +299,7 @@ def update_daily(codes: list[str], store: ParquetStore, cfg: Config,
             for attempt in range(max(1, cfg.retry)):
                 try:
                     status = _fetch_attempt(f)
-                except Exception:
+                except Exception:  # noqa: BLE001 单个源失败要退到下一源/重试，不能中断整批
                     status = "error"
                     if attempt < max(1, cfg.retry) - 1:
                         time.sleep(0.5)

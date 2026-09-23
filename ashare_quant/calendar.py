@@ -50,7 +50,7 @@ class TradingCalendar:
         self._dates = pd.DatetimeIndex(sorted(set(pd.to_datetime(dates))))
 
     @classmethod
-    def from_dates(cls, dates) -> "TradingCalendar":
+    def from_dates(cls, dates) -> TradingCalendar:
         return cls(dates)
 
     @property
