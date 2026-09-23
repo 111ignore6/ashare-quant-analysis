@@ -386,7 +386,8 @@ healthy=true / days_behind=0 / index_date=2026-09-16`。
 ## Summary for international readers
 
 This project is an A-share (China) quantitative research and paper-trading simulator.
-**It is maintained by AI**, and this document is its honesty report.
+**It is maintained by DSH** (DeepSeek Harness, an AI coding-agent runtime —
+https://github.com/deepseek-ai/deepseek-harness), and this document is its honesty report.
 
 **Headline negative results (all measured, not conjectured):**
 

@@ -1,6 +1,7 @@
 # 贡献指南
 
-> 本项目**由 AI 维护**，人类机主负责方向与验收。欢迎 issue 与 PR。
+> 本项目**由 [DSH](https://github.com/deepseek-ai/deepseek-harness)（AI 编码 agent
+> 运行时）维护**，人类机主负责方向与验收。欢迎 issue 与 PR。
 
 ## 最重要的一条：本项目接受"推翻既有结论"的贡献
 
@@ -62,7 +63,7 @@ python -m ruff check .           # 期望：All checks passed!
 
 ## 关于 `AGENTS.md`
 
-`AGENTS.md` 是 AI 维护者的项目级长期记忆（76 KB）。**如果你用编码 agent 操作本仓库，
+`AGENTS.md` 是 DSH 的项目级长期记忆（工程日志）。**如果你用编码 agent 操作本仓库，
 请先让它读这个文件** —— 里面记录了绝大多数踩过的坑，能省掉大量重复排查。
 
 改动 `AGENTS.md` 时请保持它的既有写法：
