@@ -1,8 +1,36 @@
 # A股量化研究·模拟分析系统
 
-基于真实 A 股数据（AKShare 主 / BaoStock 备）的历史数据研究项目。
+基于真实 A 股数据的历史数据研究项目。
+
+> **实际数据源链以 `config.yaml` 为准**：主源 `akshare`（新浪），备源 `tencent` → `mootdx`。
+> `baostock` 虽在注册表里，但**不在**当前备源链中（此前本行写的「BaoStock 备」不准确）。
 
 > 本项目为模拟研究，不构成任何投资建议。
+
+## ⚠️ 先读这一条：本项目由 AI 维护
+
+**这个仓库由 AI（编码 agent）在人类机主的指导下持续开发与维护**，不是人类手写的作品集。
+
+这意味着几件事，请在阅读代码与结论前知悉：
+
+- **提交历史里的 `Codex` / `codex@local` 就是 AI 维护者**，不是笔误或匿名化处理；
+- **`AGENTS.md` 是 AI 的项目级长期记忆**（76 KB 工程日志），它记录的是"踩过什么坑、
+  哪条结论被后来的证据推翻了"——写法刻意保留原始证据强度，而不是成功叙事；
+- **AI 会犯错，本项目选择把错误留在记录里而不是删掉**。文中的
+  「未证实」「已推翻」「探针自己说谎」等字样都是真实发生过的事，
+  详见 [`docs/HONESTY.md`](docs/HONESTY.md)；
+- 因此**请对任何"漂亮"的数字保持默认怀疑**，并按 `docs/HONESTY.md`
+  第八节的引用规范核对口径。
+
+### 🔴 最重要的诚实结论（引用任何收益数字前必读）
+
+> **本项目没有证明它具备选股能力。** 2026-09-16 的样本外 A/B 实测：
+> Top-50 组合的**日均截面超额为负**，且按重叠样本校正后**统计上不显著**。
+> 正确表述是「**未证实有超额**」，不是「已证伪超额」。
+> 账户与回测里的高收益（年化 +18%~+39%）**绝大部分是市场 beta，不是 alpha**。
+
+完整清单（含仍未修复的算法问题、未验证事项、以及本项目坚持的判据纪律）
+见 **[`docs/HONESTY.md`](docs/HONESTY.md)**。
 
 ## 运行
 
@@ -47,7 +75,7 @@ akshare（新浪），既有实测 4~7 只/s（12 并发）→ 全市场约 15~2
 | 有新交易日（2026-09-16 之后） | **阶段 1 实测 36.8 s（全市场 5360 只 ≈ 145 只/s）** | 走腾讯批量报价端点（120 只/请求，取数 1.7s），且当日 bar 收盘后立即就有 |
 
 > ⚠️ 口径：上表"修复前"是 16:05 收盘高峰的生产实跑，"修复后"是同日 18:20 空闲时段的
-> scratch 实跑（**这一格为 perf-hunter 的 scratch 测量，未做第三次独立复测**），两者**不同刻**；
+> scratch 实跑（**这一格为一次隔离会话的 scratch 测量，未做第三次独立复测**），两者**不同刻**；
 > 另有一组相隔 10 分钟的 300 只**同刻 A/B** 是 **5.3×**（48.68s → 9.14s）。
 > 所以不要把这个倍数当成"纯代码收益"——里面含源端发布时点的差异。
 >
@@ -142,8 +170,14 @@ python -m streamlit run dashboard.py
   备源 `tencent` → `mootdx`。腾讯直连实测并发 12 约 22 只/秒，是新浪源的 4 倍以上，
   但高频会被 WAF 限流；更新时主源失败自动切备源）。另可选 `mootdx`（通达信协议，
   1.06k★，单次 800 根 ~0.1s，自算前复权，与腾讯复权口径约有 1% 绝对价差、
-  收益率影响可忽略）。实时行情用
-  [easyquotation](https://github.com/shidenggui/easyquotation)（5.3k★）腾讯/新浪快照。
+  收益率影响可忽略）。
+
+  > **实时行情已不再经 [easyquotation](https://github.com/shidenggui/easyquotation)**
+  > （2026-09-18 修复，此前整块失效）：该库把两家接口硬编码成**明文 http**，
+  > 两家都返回 400 空响应，而库又**静默返回空 dict** → 实时行情整块失效却看不出来。
+  > 现在 `ashare_quant/realtime.py` **直连 https + 双源降级**（腾讯 → 新浪），
+  > 全失败时显式抛 `RealtimeError`，绝不静默返回空。
+  > 因此 `easyquotation` 已从依赖中移除（`pyproject.toml` / `requirements.txt` 均已不含）。
 
 每日增量另有一条**腾讯批量报价端点**快路径（`ashare_quant/fetchers/tencent_quote.py`，
 qt.gtimg.cn）：一次请求 120 只，全市场取数约 1.7~1.9s，收盘后当日 bar 立即就有
@@ -154,8 +188,9 @@ volume 按手取整（绝对差中位 19 股 / 最大 50 股，均 ≤1 手）�
 
 内置状态（注册表实测，2026-09-16）：模型 **16 个**（linear/rf/lgbm/histgb/svm/knn/mlp/
 enet/pls/mlp_deep/xgb/rank_xgb/rank_lgb/huber_lgb/risk_aware_lgb/temporal_decay_lgb）、
-因子 5 个（momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 4 个
-（tencent/mootdx/akshare/baostock）。注意**注册表里的模型数**与**每日决策实际用的模型池**
+因子 5 个（momentum/reversal/volatility/ma_deviation/volume_ratio）、数据源 **5 个**
+（tencent/mootdx/akshare/baostock + 只做指数当日兜底的 index_snapshot；
+后者只实现 `fetch_index_daily`，**不是个股源**）。注意**注册表里的模型数**与**每日决策实际用的模型池**
 不是一回事：后者由 `config.yaml` 的 `models` 字段决定（当前 6 个）。
 
 > 说明：账户净值曲线只统计正式决策（样本外）——首次生成时仅有当日一点，
@@ -184,7 +219,7 @@ python -m ashare_quant.cli daily --data-root data/all   # 每日：增量更新 
 | 特征长表 build_dataset | ~25s | ~5.5s | 12 次 stack+concat → 一次 numpy reshape |
 | daily 无新数据 | ~51s（含联网拉全市场列表） | ~2s | universe 本地缓存 + 指数日期相等时秒回 |
 | daily 有新交易日 | ~23 分钟（1382.8s / 4989 只） | **~37 秒（5360 只，≈145 只/s）** | 腾讯批量报价端点一次多只（取数 1.7s）+ manifest 一次性写回 + 未覆盖目标日的源不再白跑 |
-| daily --force 报告+决策 | ~180s | ~28s（含每月一次的重训） | 上述全部 + SVR 采样封顶/校准集抽样 |
+| daily --force 报告+决策 | ~180s | ~28s（含每月一次的重训） | 上述全部 + SVR 采样封顶 + thresholds 改按需（不再算校准集） |
 
 数值一致性：向量化后的 IC/分层与旧逐日实现逐值对比，差异在机器精度
 （~1e-16），研究报告结果完全可复现。
@@ -223,7 +258,10 @@ python scripts/audit_qfq_anchor.py           # 换主源后审计前复权锚点
 
 ### 说明
 
-- 决策模型每月重训一次（LGBM/HistGB 6 万样本，SVR 封顶 2 万样本、校准集抽样 3 万），
+- 决策模型每月重训一次（LGBM/HistGB 6 万样本，SVR 封顶 2 万样本）。
+  ⚠️ **校准集抽样已不再是默认行为**：`train_and_save(compute_thresholds=False)` 是默认值
+  （2026-09-18 起），`thresholds` 字段保留但默认 `{}` —— 全代码 0 处读取它，
+  此前每轮为 6 个模型各跑一遍最多 3 万行预测是**纯浪费**（见 `docs/HONESTY.md` 问题⑥）。
   单次重训约 25s；SVR 全量 6 万样本训练需 ~3 分钟，故按模型差异化采样；
 - benchmark 全量算法对比（7 个 ML 模型 × 4 折 walk-forward）因含逐折 SVR/MLP 训练，
   属于算法本身的计算成本，约 5-8 分钟，与日常数据流水线无关。

@@ -1,6 +1,13 @@
-"""SciVerse MCP 论文检索工具（stdio 直连，复用 ~/.codex/config.toml 中的 token）。
+"""SciVerse MCP 论文检索工具（stdio 直连）。
+
+⚠️ 这是**可选的个人研究工具**，不属于主流水线；不需要论文检索功能可直接删掉本文件。
+
+Token 来源（按优先级）：
+    1. 环境变量 ``SCIVERSE_API_TOKEN``
+    2. ``~/.codex/config.toml`` 里的 ``SCIVERSE_API_TOKEN``（兼容旧用法）
 
 用法：
+    export SCIVERSE_API_TOKEN=...        # 或写在 ~/.codex/config.toml
     python scripts/sciverse_search.py "stock prediction" --year-from 2023 --limit 5
     python scripts/sciverse_search.py "factor mining" --semantic
 """
@@ -11,28 +18,53 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
 
 
 class SciVerseClient:
+    """通过 stdio 直连 sciverse-mcp-server 的极简 MCP 客户端。
+
+    Token 解析顺序（2026-09-18 改为可移植版本，此前硬编码了本机路径）：
+      1. 环境变量 ``SCIVERSE_API_TOKEN``
+      2. ``~/.codex/config.toml`` 里的 ``SCIVERSE_API_TOKEN``（兼容旧用法）
+    ``npx`` 通过 ``shutil.which`` 解析，不再写死本机的 Node 安装路径。
+    """
+
+    #: 固定包名，避免运行期解析到未预期的版本
+    MCP_PACKAGE = "sciverse-mcp-server"
+
     def __init__(self) -> None:
-        cfg_path = os.path.expanduser("~/.codex/config.toml")
-        cfg = open(cfg_path, encoding="utf-8").read()
-        match = re.search(r'SCIVERSE_API_TOKEN\s*=\s*"([^"]+)"', cfg)
-        if not match:
-            raise RuntimeError("config.toml 中未找到 SCIVERSE_API_TOKEN")
         env = os.environ.copy()
-        env["SCIVERSE_API_TOKEN"] = match.group(1)
-        cmd = [r"D:\nodejs\node.exe", r"D:\nodejs\node_modules\npm\bin\npx-cli.js",
-               "-y", "sciverse-mcp-server"]
+        token = env.get("SCIVERSE_API_TOKEN") or self._token_from_codex_config()
+        if not token:
+            raise RuntimeError(
+                "未找到 SCIVERSE_API_TOKEN：请设置环境变量，"
+                "或在 ~/.codex/config.toml 里写 SCIVERSE_API_TOKEN = \"...\"")
+        env["SCIVERSE_API_TOKEN"] = token
+        npx = shutil.which("npx") or shutil.which("npx.cmd")
+        if not npx:
+            raise RuntimeError("PATH 里找不到 npx（需要 Node.js）")
+        cmd = [npx, "-y", self.MCP_PACKAGE]
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             encoding="utf-8", errors="replace", text=True, env=env, bufsize=1)
         threading.Thread(target=self._drain_stderr, daemon=True).start()
         self._id = 0
         self._init()
+
+    @staticmethod
+    def _token_from_codex_config() -> str | None:
+        cfg_path = os.path.expanduser("~/.codex/config.toml")
+        try:
+            with open(cfg_path, encoding="utf-8") as fh:
+                cfg = fh.read()
+        except OSError:
+            return None
+        match = re.search(r'SCIVERSE_API_TOKEN\s*=\s*"([^"]+)"', cfg)
+        return match.group(1) if match else None
 
     def _drain_stderr(self) -> None:
         for _ in self.proc.stderr:

@@ -10,3 +10,23 @@ dashboard_smoke.log
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# 打包 / 安装产物
+*.egg-info/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 工具缓存
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

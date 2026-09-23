@@ -2,6 +2,25 @@
 
 > 本文件是项目级长期记忆：任何对话（包括新开会话）操作此仓库时，
 > 先读这里，避免重复踩坑。模拟研究，不构成投资建议。
+>
+> ## 关于本文件（公开版说明）
+>
+> 这是一个**由 AI 维护的项目**，本文件是 AI 维护者在长期迭代中沉淀下来的工程日志。
+> 它的写法刻意保留了**原始证据强度**，而不是写成"产品文档"式的成功叙事：
+>
+> - **每条结论都标注它是「实测 / 引用 / 推断 / 未证实」中的哪一种**；
+>   被后续证据推翻的旧结论**不删除**，而是标注作废并保留原文——因为"当初为什么那么想"
+>   本身就是防止重犯的材料；
+> - **失败、误判、自相矛盾、探针自己说谎**都如实记录（例如「自述指标必须与实测对撞，
+>   不能自证」这条约定，就是被一次真实漏报逼出来的）；
+> - **未证实的东西明确写成"未证实"**，不给它配行动建议。
+>
+> 因此文中会出现「一次性探针脚本（未随仓库发布）」「scratch 副本」「隔离会话」这类字样：
+> 它们指当时用于独立复核的临时手段，脚本本身不在仓库里，但**结论与判据是可复现的**
+> （可复现的部分都写成了可直接粘贴的命令）。
+>
+> 面向公开读者的**诚实性结论摘要**见 [`docs/HONESTY.md`](docs/HONESTY.md)——
+> 如果你只想快速知道"这个项目到底证明了什么、没证明什么"，读那一份就够了。
 
 ## 项目是什么
 
@@ -108,8 +127,9 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
       全市场 5362 个文件约 2 秒），看**数据截止日的分布**。`manifest.json` 的 `end`
       实测与 parquet 实际 max 一致（5361 条比对 0 处不一致）——manifest 没坏，
       坏的是"文件被重写就记成已更新"的记账口径。
-    - **实测**：以上全部数字（Lead 探针 `.dsh-ui-shots/verify_data_health2.py`、
-      `probe_mtime.py`；另用上面的元数据统计法独立复核，逐项一致）。
+    - **实测**：以上全部数字由两个一次性探针得出（`verify_data_health2.py`、
+      `probe_mtime.py`，**属当时的临时脚本、未随仓库发布**），另用上面的元数据统计法
+      独立复核，逐项一致。
     - **未证实（不要写成结论）**：为什么 09-16 16:05 只有 209 只（全部 `00` 开头）拿到了当日 bar；
       以及"新浪源 16:05 尚未发布当日 bar"这个时序归因 —— 目前只有 17:40 能取到当日数据的观测，
       加上 `sh000300.parquet` mtime=16:05:12 的旁证，**没有 16:05 时刻的直接采样**。
@@ -127,7 +147,7 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
     （把修复行还原到 scratch 副本上跑，实测必红）。
     ⚠️ **未验证**：这些改造消除了对"新浪当日可得性"的依赖（改走腾讯批量报价），但
     "**16:05 那一刻**腾讯/新浪是否都已发布当日 bar"只在 17:24 之后实测过，**没有 16:05 时刻的
-    直接采样**；不要写成"16:05 必然成功"，最终证据由 Lead 的生产补齐实验给出。
+    直接采样**；不要写成"16:05 必然成功"，最终证据要靠生产环境补齐实验给出（见「当前状态」）。
   - **`healthy / days_behind` 过去只看指数、会漏报个股（已修）**：`cli._data_health` 现在还要求
     "预期外落后 ≤ max(10, 1% 股票数)"；`update_stats.json` 新增 `stocks_total / stocks_behind /
     stocks_behind_expected / stocks_behind_unexpected / completeness / stocks_ok`。
@@ -137,11 +157,11 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
   - **⚠️ `no_data` 不是"停牌数"，冷却表也不是停牌集合**：2026-09-16 修复前那次 `no_data=371`
     （`update_failed.json` 378 条，值是**进入冷却的日期**，不是原因字段：
     `{'2026-09-16': 371, '2026-09-14': 4, '2026-09-11': 3}`），**抽样直接问 akshare/sina：
-    30/30 都返回 `last=2026-09-16`**（Lead 实测）→ 这 371 只**不是停牌**，是被上面那条
+    30/30 都返回 `last=2026-09-16`**（逐只直问源实测）→ 这 371 只**不是停牌**，是被上面那条
     "非空即 updated + 备源不触发"缺陷误判的正常股票。
     所以 **"冷却中的代码" ≠ "确实停牌"**：任何把冷却表当停牌集合用的口径（含仪表盘的 `expected`）
     都可能被环境误判污染。要不要判真停牌必须另证（腾讯报价 `volume=0`，或直问源）：
-    perf-hunter 在 scratch 上量到 **6 只真停牌**（301390/600825/603159/600301/601238/605303，
+    独立复核（另一次隔离会话，在 scratch 副本上）量到 **6 只真停牌**（301390/600825/603159/600301/601238/605303，
     volume=0）、scratch 冷却表共 **10 条**；而**生产当日是 371 条**（其中抽样 30/30 并非停牌）。
     历史记载的 09-11 真停牌是 **8 只**（002870/301390/600825/600929/603159/605577/688291/688432）。
     **这几个数都不要当成"今天的停牌集合"** —— 口径或日子一变就不一样。
@@ -238,8 +258,8 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
     改脚本不会自动生效）：`powershell -ExecutionPolicy Bypass -File scripts\schedule_daily.ps1 -Force`。
     实测该任务 Principal = 当前用户 / LogonType=Interactive / RunLevel=Limited；
     `-Force` 已改为 `Set-ScheduledTask` **原地更新**，不再先删后建（旧写法中途失败会永久丢任务，
-    见 08-14 事故）。**2026-09-16 Lead 实跑 `-Force` 成功**（原地更新、无任务空窗），
-    `Get-Command python` 在 `-NoProfile` 非交互 PS 里实测解析到 `D:\anaconda3\python.exe`；
+    见 08-14 事故）。**2026-09-16 实跑 `-Force` 成功**（原地更新、无任务空窗），
+    `Get-Command python` 在 `-NoProfile` 非交互 PS 里实测解析到 Anaconda 的 `python.exe`；
     是否需要管理员**未测定**（执行环境是否提权未知），失败只会报 Access denied，不破坏任务。
   - ⚠️ **`New-ScheduledTaskTrigger -Weekly` 会重建触发器，`StartBoundary` 会被改成"执行当天 16:05"**：
     2026-09-16 那次更新后它从 `2026-08-27T16:05` 变成 `2026-09-16T16:05`。触发时间不变、
@@ -329,7 +349,7 @@ python -m ashare_quant.cli fetch     # 全量下载（幂等，已有则跳过�
 python -m ashare_quant.cli simulate  # 模拟盘回测
 python -m ashare_quant.cli decision  # 训练/加载模型 + 今日决策
 python -m streamlit run dashboard.py # 仪表盘（端口 8501）
-python -m pytest tests/ -q           # 全量测试（当前 212 项，必须全绿再提交）
+python -m pytest tests/ -q           # 全量测试（当前 221 项，必须全绿再提交）
 python -m ruff check .               # 静态检查
 python scripts/audit_qfq_anchor.py   # 换数据源后审计前复权锚点一致性（--fix 可整段重建）
 python scripts/fix_volume_unit.py    # 成交量量纲体检（dry-run；应始终报"需要修复 0 只"）
@@ -366,7 +386,7 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
 
 ## 当前状态（2026-09-16）
 
-> 本节是 **2026-09-16 的快照**。数据侧一旦有变化（尤其流水线修好、或 Lead 执行生产补数据），
+> 本节是 **2026-09-16 的快照**。数据侧一旦有变化（尤其流水线修好、或执行生产补数据），
 > 请连同下面的数字一起更新，别让本节变成过期结论。
 
 - **2026-09-18（实时行情修复 + 全市场成交量量纲修复）**：
@@ -403,7 +423,7 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
   ⑩ **算法问题⑥（死计算 thresholds）已修**：改为按需（默认不算），省下每轮 6 组校准期预测；
   ⑪ **缓存不再被自己刷失效**：`cache.append` 内容相同时不写盘 → 面板/特征缓存真的会命中
   （实测 `panels/meta.json` mtime 不变、`build_panels` 25 s → 3.0 s）。
-  实测：**全量测试 212 项全绿、`ruff check .` 全绿**；六处新判据的熔断丝都自证过
+  实测：**全量测试 221 项全绿、`ruff check .` 全绿**；六处新判据的熔断丝都自证过
   （audit 旧判据红 3/8、退出码旧行为红 6/6、链尾 append 删掉红 2/2、批量报价 ×100 红 3/5、
   embargo+thresholds 红 2/2、缓存刷新红 2/2）。
   详见「已知问题」3、4。
@@ -456,10 +476,12 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
     这三条都是**读文件实测**；根因见「关键机制」里特征缓存指纹那条。
 - **计划任务 AshareQuantDaily 正常**：实测 `LastRunTime=2026-09-16 16:05:05`、
   `LastTaskResult=0`、`NextRunTime=2026-09-17 16:05:05`、`NumberOfMissedRuns=0`。
-  日志改 UTF-8 的新命令**已于 2026-09-16 由 Lead 原地更新进任务**（`Set-ScheduledTask`，无空窗），
+  日志改 UTF-8 的新命令**已于 2026-09-16 原地更新进任务**（`Set-ScheduledTask`，无空窗），
   因此 **09-17 16:05 那一次就是首次以 UTF-8 写日志**；跑完后按「已知问题」2 的判据 B 验一次。
-- **测试**：**212 项全绿**（`python -m pytest tests/` 实测 `212 passed`）、`python -m ruff check .` 全绿。
-  演进：126 →（09-16）155 →（09-18 第一轮）179 →（09-18 第二轮）**203**；
+- **测试**：**221 项全绿**（`python -m pytest tests/` 实测 `221 passed`）、`python -m ruff check .` 全绿。
+  演进：126 →（09-16）155 →（09-18 第一轮）179 →（09-18 第二轮）203 →（09-18 第三轮）**221**；
+  ⚠️ 本节此前写「212 项」，而同一段列的演进又止于 203 —— **自相矛盾且都过期**。
+  项数以 `python -m pytest tests/ --collect-only -q` 的**实测**为准，别照抄数字。
   新增集中在 daily 正确性/批量快路径、特征与面板缓存判据、抓取源链、成交量审计、
   指数报价兜底源与仪表盘冒烟。
   偶发的 statsmodels 扩展加载失败见「已知问题」1。
@@ -484,7 +506,7 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
 ### 1. 偶发：`test_volatility_clustering_on_garch_like_series` 首次加载 statsmodels 编译扩展失败
 
 - **现象**（2026-09-16 观测 1 次 / 全量 4 次）：全量测试偶发只红这一个，报错位置在
-  `D:\anaconda3\Lib\site-packages\statsmodels\tsa\stattools.py:39`
+  `<site-packages>\statsmodels\tsa\stattools.py:39`
   （`from statsmodels.tsa._innovations import innovations_algo, innovations_filter`）；
   单独跑 `tests/test_research_stats.py` 必绿。
 - **已定性（实测）**：该行是 statsmodels 编译扩展
@@ -741,7 +763,7 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
   新增任何解析成交量的模块都必须调用它，并补一条 688 的测试。
 
 
-## 账户口径与算法审查（2026-09-16 晚，Lead 独立审查）
+## 账户口径与算法审查（2026-09-16 晚，独立审查）
 
 - **账户曾在模拟"每日全额换仓且零成本"，账面收益被系统性高估。**
   实测：27 次 live 决策间隔 {1天:18, 2天:2, 3天:6}（≈每日），单边换手率均值 **59.4%**；
@@ -769,8 +791,17 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
   漏改 `account_basis` 时实测实时页 106,313 vs 账户页 107,274。已统一为
   `costs_from_config(cfg)` + `cfg.rebalance`，共 5 处（写盘 1 + 仪表盘 recompute 2 + account_basis 3 个调用点）。
 - **仍未修的算法问题（审查发现，未动手）**：
-  ① **ML 基准 `backtest/simple.py` 也是零成本**（AGENTS.md 里"年化 78.5%/夏普 2.81"等招牌数出自它，
-     月频换手下成本影响小于日频，但仍需标注为毛收益）；
+  ① **ML 基准 `backtest/simple.py` 的成本口径 —— 部分已修（2026-09-18 复核更正）**：
+     本条目原写"也是零成本"，那在写下时是对的，**现已不准确**，据实更正如下：
+     `simple_topn_returns` 已加 `costs=` 参数（2026-09-16），`ml/benchmark.py` 的 **8 处调用
+     全部传 `costs=BENCH_COSTS`**（净口径），生成器抬头也已写清成本参数；
+     **但 `ml/evaluate.py:41` 与 `screening.py:63,90` 仍不传成本 = 毛收益**，
+     这两条路径的数字（模型筛选、单模型评估）仍需按毛收益读。
+     ⚠️ **更要注意的是已提交的历史报告**：`docs/research/algorithm-benchmark{,-all}.md`
+     生成于 08-10/08-11（**早于成本修复**），数字是毛收益，**而抬头写着"含交易成本"**——
+     已在两份报告顶部加「口径更正」横幅（**不改写历史数字**）。
+     `docs/research/modern-models-2026.md` 里"年化 78.5% / 夏普 2.81"等招牌数同源，同按毛收益读。
+     月频换手下成本影响小于日频，但**毛收益会系统性偏向高换手模型**；
   ② **target 是原始 20 日收益，未做横截面去均值** —— 策略是横截面 Top-N、永远满仓，
      原始收益里绝大部分是市场共同波动（beta），模型会花容量去预测当天排名用不到的东西；
   ③ 特征里 `index_ret_20/index_vol_20/index_state` 是**市场级**量，同一天对所有股票相同，
@@ -803,8 +834,8 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
 
 ## ⚠️ 最重要的算法发现：Top-50 没有可证实的选股超额（2026-09-16 实测）
 
-用 walk-forward 样本外做了 target 口径的 A/B（脚本 `.dsh-ui-shots/ab_target_mode.py`），
-结果**推翻了原有叙事**，请务必先读这一段再引用任何收益数字。
+用 walk-forward 样本外做了 target 口径的 A/B（一次性脚本 `ab_target_mode.py`，
+**未随仓库发布**；结论与证据如下表），结果**推翻了原有叙事**，请务必先读这一段再引用任何收益数字。
 
 | 模型 | target | 日均截面超额 | t值(未校正) | 月均毛收益 | 年化(毛) |
 |---|---|---|---|---|---|

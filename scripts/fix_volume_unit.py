@@ -30,9 +30,12 @@
 
 用法::
 
-    python scripts/fix_star_market_volume.py             # dry-run（默认，只报告）
-    python scripts/fix_star_market_volume.py --apply     # 写入（先备份被改文件）
-    python scripts/fix_star_market_volume.py --verify    # 全量对撞 akshare 验收
+    python scripts/fix_volume_unit.py             # dry-run（默认，只报告）
+    python scripts/fix_volume_unit.py --apply     # 写入（先备份被改文件）
+    python scripts/fix_volume_unit.py --verify    # 全量对撞 akshare 验收
+
+（2026-09-18 更正：本段此前把脚本名写成 ``fix_star_market_volume.py``，
+该文件**不存在** —— 脚本自己的用法说明是坏的。实际名字是 ``fix_volume_unit.py``。）
 
 备份目录：``data/tencent_volume_bak_<YYYYMMDD>/``（仅备份被修改的文件）。
 改完必须接着跑：``daily --force``（重建面板/特征/决策）+

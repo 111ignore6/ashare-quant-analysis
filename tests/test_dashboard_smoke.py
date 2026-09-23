@@ -243,7 +243,7 @@ def test_theme_probe_does_not_read_transparent_container():
     实测真正承载主题底色的是 ``document.body``（浅 rgb(245,247,250) / 暗 rgb(13,17,23)）。
 
     边界（别把这条当万能）：本测试只钉住**源码里的结构不变量**，不执行 JS。
-    行为验证在 ``.dsh-ui-shots/verify_theme_v4.py``：playwright 真实点击
+    行为验证由一次性脚本 ``verify_theme_v4.py`` 完成（**未随仓库发布**）：playwright 真实点击
     ⋯ → Dark → Light → Dark，逐步断言期望主题（pytest 里没有浏览器，跑不了那一段）。
     """
     probe = _probe_source()

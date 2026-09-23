@@ -1,0 +1,31 @@
+# 换行符：仓库内一律 LF
+* text=auto eol=lf
+
+# 明确文本类型（避免被当成二进制而失去 diff）
+*.py    text
+*.md    text
+*.toml  text
+*.yaml  text
+*.yml   text
+*.json  text
+*.jsonl text
+*.csv   text
+*.txt   text
+*.bat   text
+
+# PowerShell 5.1 读中文 .ps1 需要 UTF-8 BOM，且脚本按 CRLF 写；
+# 这里显式声明为 text（保留 diff），但**不做换行转换**，以免破坏 BOM 与编码约定。
+*.ps1   text -eol
+
+# 二进制 / 生成物：不做换行转换
+*.parquet binary
+*.png     binary
+*.jpg     binary
+*.ico     binary
+
+# 生成物：每天会被计划任务重写，在 diff 与语言统计里折叠
+docs/simulation*/report.html               linguist-generated=true
+docs/simulation*/decision.json             linguist-generated=true
+docs/simulation*/decision.csv              linguist-generated=true
+docs/research/algorithm-benchmark*.json    linguist-generated=true
+docs/research/volume_integrity_report.json linguist-generated=true

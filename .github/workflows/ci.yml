@@ -1,0 +1,53 @@
+name: CI
+
+# 为什么要有这个文件：README 与 CONTRIBUTING 都写着
+# "`pytest` 与 `ruff check .` 均须全绿再提交"，但在 2026-09-18 之前
+# **没有任何东西强制执行它**。按本项目自己的判据纪律
+# （"自述指标必须与实测对撞，不能自证"），一条没人跑的验收等于没有验收。
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest + ruff (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # 只装测试真正需要的子集：
+      # 测试套件不联网、不建面板，因此 akshare / baostock / mootdx 这些
+      # 抓数依赖不必安装（它们的 fetcher 模块在测试里被 monkeypatch 掉）。
+      # 若将来有测试真的 import 了它们，这一步会红 —— 那正是我们要知道的。
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pandas numpy scipy statsmodels scikit-learn
+          python -m pip install lightgbm xgboost pyarrow PyYAML requests joblib
+          python -m pip install plotly tqdm
+          python -m pip install pytest ruff
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Test (pytest)
+        run: python -m pytest tests/ -q
+
+      # 项数必须与 README/AGENTS.md 里写的对得上 ——
+      # 这两处曾经自相矛盾（一个说 212、同段的演进列表却止于 203）。
+      - name: Report test count
+        run: python -m pytest tests/ --collect-only -q
