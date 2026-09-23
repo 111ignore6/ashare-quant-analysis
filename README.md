@@ -2,8 +2,8 @@
 
 基于真实 A 股数据的历史数据研究项目。
 
-> **实际数据源链以 `config.yaml` 为准**：主源 `akshare`（新浪），备源 `tencent` → `mootdx`。
-> `baostock` 虽在注册表里，但**不在**当前备源链中（此前本行写的「BaoStock 备」不准确）。
+> **数据源链以 `config.yaml` 为准**：主源 `akshare`（新浪），备源 `tencent` → `mootdx`。
+> `baostock` 在注册表里但**不在**当前备源链中。
 
 > 本项目为模拟研究，不构成任何投资建议。
 
