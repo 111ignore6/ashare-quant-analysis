@@ -104,6 +104,7 @@ def cmd_research(args) -> None:
 def cmd_select(args) -> None:
     import json
 
+    from .backtest.simple import DEFAULT_COSTS
     from .pipeline import build_panels
     from .research.report import screening_to_markdown
     from .screening import run_screening
@@ -121,7 +122,9 @@ def cmd_select(args) -> None:
         idx_df = idx_fetch("sh000300")
         store.save("sh000300", idx_df)
         bench = idx_df["close"]
-    out = run_screening(close, volume, bench, top_n=cfg.top_n)
+    # 净口径筛选：毛收益会系统性偏向高换手模型，拿它做模型选型等于在奖励换手
+    # （2026-09-18 审查发现旧报告是毛收益，见 docs/HONESTY.md）。
+    out = run_screening(close, volume, bench, top_n=cfg.top_n, costs=DEFAULT_COSTS)
     target = Path(args.out)
     screening_to_markdown(out, target)
     (target.with_suffix(".json")).write_text(
@@ -418,7 +421,7 @@ def cmd_report(args) -> None:
 
 
 def cmd_benchmark(args) -> None:
-    from .ml.benchmark import run_benchmark, write_report
+    from .ml.benchmark import BENCH_FOLDS, run_benchmark, write_report
     from .pipeline import build_panels
 
     cfg = Config.from_yaml(Path(args.config))
@@ -437,7 +440,11 @@ def cmd_benchmark(args) -> None:
     table, series = run_benchmark(close, volume, index_close,
                                   top_n=cfg.top_n, with_dl=args.with_dl)
     out = Path(args.out)
-    write_report(table, out, out.with_suffix(".json"))
+    # 报告抬头必须写**实际跑的参数**，不能写死（2026-09-18 修复：曾把 15 个月写成 18 个月）
+    universe = "等权全市场" if str(cfg.universe_mode).lower() == "all" else "沪深300 成分股"
+    write_report(table, out, out.with_suffix(".json"),
+                 universe=universe, years=int(cfg.years), top_n=int(cfg.top_n),
+                 **BENCH_FOLDS)
     returns_path = out.with_name(out.stem + ".returns.csv")
     pd.DataFrame(series).to_csv(returns_path, encoding="utf-8-sig")
     print(f"算法收益序列已保存: {returns_path}")

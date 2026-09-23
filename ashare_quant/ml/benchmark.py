@@ -24,6 +24,11 @@ from .models import MODELS
 # 用它做模型选型等于在奖励换手。成本参数与 backtest/engine.py 一致。
 BENCH_COSTS = dict(DEFAULT_COSTS)
 
+# walk-forward 折参数：**单一事实来源**。
+# run_benchmark 用它切折，报告抬头也用它写"训练 X 个月"——
+# 两处写死过一次，结果报告说 18 个月、实际跑 15 个月（2026-09-18 修复）。
+BENCH_FOLDS = {"train_months": 15, "valid_months": 6, "step_months": 6}
+
 
 def _valid_rdates(folds) -> list:
     return sorted({d for _, va in folds for d in monthly_rebalance_dates(va)})
@@ -274,7 +279,7 @@ def _metrics_row(name: str, returns: pd.Series) -> dict:
 def run_benchmark(close: pd.DataFrame, volume: pd.DataFrame, index_close: pd.Series,
                   top_n: int = 50, with_dl: bool = False,
                   sample_size: int = 40000) -> tuple[pd.DataFrame, dict]:
-    folds = walk_forward_folds(close.index, train_months=15, valid_months=6, step_months=6)
+    folds = walk_forward_folds(close.index, **BENCH_FOLDS)
     X, y = build_dataset(close, volume, index_close, horizon=20)
     rows = []
     series: dict[str, pd.Series] = {}
@@ -295,7 +300,8 @@ def run_benchmark(close: pd.DataFrame, volume: pd.DataFrame, index_close: pd.Ser
     for name, factory in MODELS.items():
         m, rets = walk_forward_ml_evaluate(name, factory, X, y, close,
                                            folds=folds, top_n=top_n,
-                                           sample_size=sample_size)
+                                           sample_size=sample_size,
+                                           costs=BENCH_COSTS)
         rows.append({k: m.get(k, 0.0) for k in
                      ("model", "annual_return", "sharpe", "max_drawdown", "win_rate")} |
                     {"mean_ic": m.get("mean_ic", 0.0), "n_periods": int(len(rets))})
@@ -415,7 +421,17 @@ def _gru_returns(X: pd.DataFrame, close: pd.DataFrame, folds, top_n: int = 50,
     return pd.concat(all_rets)
 
 
-def write_report(table: pd.DataFrame, out_md: Path, out_json: Path) -> None:
+def write_report(table: pd.DataFrame, out_md: Path, out_json: Path,
+                 train_months: int = 15, valid_months: int = 6, step_months: int = 6,
+                 universe: str = "沪深300 成分股", years: int = 3, top_n: int = 50,
+                 embargo_days: int = 0) -> None:
+    """写对比报告。
+
+    ⚠️ 这些参数**必须与实际运行的一致**（2026-09-18 修复）：此前函数体把
+    "训练 18 个月"和"沪深300 成分股"两句话**写死**在字符串里，
+    而 `run_benchmark` 实际用 `train_months=15`，且全市场模式也照印"沪深300 成分股"
+    —— 生成物里的参数说明与真实运行不符，属于"文档说谎"。
+    """
     out_md.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# 算法表现对比报告（统一滚动样本外评测）", "",
              "> 模拟研究，仅用于数据分析与学习，不构成投资建议。", "",
@@ -429,19 +445,38 @@ def write_report(table: pd.DataFrame, out_md: Path, out_json: Path) -> None:
                      f"{r['max_drawdown']:.2%} | {r['win_rate']:.2%} | "
                      f"{ic_txt} | {int(r['n_periods'])} |")
     lines += ["", "## 说明", "",
-              "- 数据：沪深300 成分股 3 年日线，月度调仓 Top-50 等权（含交易成本的简单回测口径）；",
-              "- 评测：walk-forward 多折（训练 18 个月/验证 6 个月/步进 6 个月），样本外收益汇总；",
+              f"- 数据：{universe} {years} 年日线，月度调仓 Top-{top_n} 等权；",
+              "- **口径：净收益（已扣交易成本）** —— 单边换手 × "
+              f"(佣金 {BENCH_COSTS['commission']:.4%} + 印花税 {BENCH_COSTS['stamp']:.4%} + "
+              f"滑点 {BENCH_COSTS['slippage']:.4%})，与 `backtest/engine.py` 同参。",
+              "  ⚠️ **2026-09-16 之前的报告是毛收益**（当时 `simple_topn_returns` 无成本参数），",
+              "  但报告抬头照样写着「含交易成本」——引用旧报告的数字前先看它的生成日期。",
+              "  ⚠️ **2026-09-18 之前，ML 模型行仍是毛收益**（`walk_forward_ml_evaluate` 没有",
+              "  `costs` 参数），而基准/集成行是净收益 —— 同一张表混排两种口径。已修。",
+              f"- 评测：walk-forward 多折（训练 {train_months} 个月/验证 {valid_months} 个月/"
+              f"步进 {step_months} 个月），样本外收益汇总；",
               "- ML 模型输入 Alpha158 简化特征（动量/波动/均线/量比/横截面排名/指数状态），预测未来 20 日收益后排序选股；",
               "- 保形门控：校准残差分位阈值，预测强度不足的股票不进入选股池；",
+              "  注意该行**只用每折验证段的后一半**做评估，期数约为其他 ML 行的一半，横向比较夏普时须留意；",
               "- 状态路由：按指数波动状态在反转/低波/动量间选择（训练段学习映射）；",
-              "- IC 自适应：按滚动 IC 给因子在线加权。"]
+              "- IC 自适应：按滚动 IC 给因子在线加权；",
+              "- ⚠️ **这些是绝对收益，不是超额收益**：同期大盘上涨时，正收益里绝大部分是 beta。",
+              "  本项目 2026-09-16 的样本外 A/B 实测「Top-50 的日均截面超额为负且不显著」，",
+              "  引用任何年化/夏普数字前请先读 `docs/HONESTY.md`。",
+              "- ⚠️ **本报告的 walk-forward 折之间没有 purge/embargo**：目标跨度 20 个交易日，",
+              "  每折训练段末尾约 20 个交易日的标签会伸进验证段，ML 数字因此偏乐观。",
+              "  生产训练路径（`ml/decision.py`）已修（embargo 20 日），**评估路径尚未修**，",
+              "  见 `docs/HONESTY.md`「仍未修复的方法论问题」。"]
     top = table.sort_values("sharpe", ascending=False).head(5)
-    lines += ["", "## 初步结论", ""]
+    lines += ["", "## 初步结论", "",
+              "> 按夏普排序的前 5 名。**各行的期数不同**（见上表 n_periods 列），",
+              "> 尤其保形门控行只覆盖半个验证窗口 —— 直接比夏普并不严格可比。", ""]
     for i, (_, r) in enumerate(top.iterrows(), 1):
         lines.append(f"{i}. **{r['model']}**：夏普 {r['sharpe']:.2f}，年化 {r['annual_return']:.1%}，"
-                     f"最大回撤 {r['max_drawdown']:.1%}，胜率 {r['win_rate']:.0%}。")
-    lines += ["", "机器学习（树模型/SVM/MLP/GRU）与不确定性门控在样本外整体优于手工因子基线；",
-              "保形门控显著降低回撤；该结论基于沪深300三年数据，仍需全市场与更长历史复验。"]
+                     f"最大回撤 {r['max_drawdown']:.1%}，胜率 {r['win_rate']:.0%}，"
+                     f"期数 {int(r['n_periods'])}。")
+    lines += ["", "**以上是绝对收益（含 beta），不是超额收益；且未经市场中性检验。**",
+              "该结论基于本报告抬头所述的数据范围，仍需更长历史与全市场复验。"]
     out_md.write_text("\n".join(lines), encoding="utf-8")
     out_json.write_text(json.dumps(table.to_dict(orient="records"),
                                    ensure_ascii=False, default=str), encoding="utf-8")

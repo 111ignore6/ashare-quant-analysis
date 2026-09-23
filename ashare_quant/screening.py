@@ -57,38 +57,46 @@ def walk_forward_folds(dates, train_months: int = 18, valid_months: int = 6,
 
 
 def evaluate(model, close: pd.DataFrame, volume: pd.DataFrame,
-             dates, top_n: int = 50) -> dict:
+             dates, top_n: int = 50, costs: dict | None = None) -> dict:
+    """单模型在给定日期段上的 Top-N 表现。
+
+    costs: 传给 `simple_topn_returns`；**None = 毛收益**（见该函数 docstring 的警告：
+    毛收益会系统性偏向高换手模型，拿它做模型选型等于在奖励换手）。
+    """
     score = model.score(close, volume)
     rdates = monthly_rebalance_dates(dates)
-    rets = simple_topn_returns(score, close, rdates, top_n=top_n)
+    rets = simple_topn_returns(score, close, rdates, top_n=top_n, costs=costs)
     m = metrics_from_returns(rets, periods_per_year=12)
     m["model"] = model.name
     return m
 
 
 def grid_search(model_cls, param_grid: dict, close: pd.DataFrame, volume: pd.DataFrame,
-                dates, top_n: int = 50) -> dict:
+                dates, top_n: int = 50, costs: dict | None = None) -> dict:
     keys = list(param_grid)
     best = None
     for combo in itertools.product(*param_grid.values()):
         params = dict(zip(keys, combo))
         model = model_cls(**params)
-        m = evaluate(model, close, volume, dates, top_n=top_n)
+        m = evaluate(model, close, volume, dates, top_n=top_n, costs=costs)
         if best is None or m["sharpe"] > best["sharpe"]:
             best = {**params, "sharpe": m["sharpe"]}
     return best or {}
 
 
 def walk_forward_evaluate(model_cls, param_grid: dict, close: pd.DataFrame,
-                          volume: pd.DataFrame, folds, top_n: int = 50) -> tuple:
+                          volume: pd.DataFrame, folds, top_n: int = 50,
+                          costs: dict | None = None) -> tuple:
     """多折滚动验证：每折训练段定参、验证段检验，汇总所有验证段收益。"""
     all_rets, last_params = [], {}
     for train_dates, valid_dates in folds:
-        best = grid_search(model_cls, param_grid, close, volume, train_dates, top_n=top_n)
+        best = grid_search(model_cls, param_grid, close, volume, train_dates,
+                           top_n=top_n, costs=costs)
         last_params = {k: v for k, v in best.items() if k != "sharpe"}
         model = model_cls(**last_params) if last_params else model_cls()
         rets = simple_topn_returns(model.score(close, volume), close,
-                                   monthly_rebalance_dates(valid_dates), top_n=top_n)
+                                   monthly_rebalance_dates(valid_dates), top_n=top_n,
+                                   costs=costs)
         all_rets.append(rets)
     series = pd.concat(all_rets)
     return series, metrics_from_returns(series, periods_per_year=12), last_params
@@ -108,7 +116,15 @@ CANDIDATES = [
 
 def run_screening(close: pd.DataFrame, volume: pd.DataFrame,
                   benchmark_close: pd.Series, top_n: int = 50,
-                  max_drawdown_floor: float = -0.35) -> pd.DataFrame:
+                  max_drawdown_floor: float = -0.35,
+                  costs: dict | None = None) -> pd.DataFrame:
+    """候选模型筛选。
+
+    costs: **强烈建议传 `backtest.simple.DEFAULT_COSTS`**（净口径）。
+        不传 = 毛收益，会系统性偏向高换手模型 —— 这正是
+        `docs/research/model-selection*.md` 里那份排名的口径缺陷（2026-09-18 审查发现，
+        见 `docs/HONESTY.md`）。参数默认 None 只是为了不静默改变既有调用方的行为。
+    """
     folds = walk_forward_folds(close.index)
     rows = []
     bench_close = benchmark_close.reindex(close.index)
@@ -132,7 +148,8 @@ def run_screening(close: pd.DataFrame, volume: pd.DataFrame,
                  "max_drawdown": csi["max_drawdown"], "keep": True,
                  "reason": "参考基准：沪深300买入持有"})
     for name, cls, grid in CANDIDATES:
-        _, m, params = walk_forward_evaluate(cls, grid, close, volume, folds, top_n=top_n)
+        _, m, params = walk_forward_evaluate(cls, grid, close, volume, folds,
+                                             top_n=top_n, costs=costs)
         keep = m["sharpe"] > 0 and m["max_drawdown"] > max_drawdown_floor
         beats = m["sharpe"] > bm["sharpe"]
         reason = ("样本外夏普 %.2f > 0 且回撤可控" % m["sharpe"]
