@@ -9,7 +9,6 @@
 
 import numpy as np
 import pandas as pd
-
 from ashare_quant.ml.benchmark import BENCH_FOLDS, write_report
 
 

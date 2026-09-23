@@ -172,8 +172,8 @@ def cmd_simulate(args) -> None:
 def _build_html_report(cfg, store, out_dir, panels=None) -> None:
     from .models.candidates import LowVolModel, MomentumModel, MultiFactorModel, ReversalModel
     from .pipeline import build_panels
-    from .report.html_report import build_html_report, drawdown_figure, equity_figure, factor_heatmap
     from .research.factor_stats import factor_report
+    from .report.html_report import build_html_report, drawdown_figure, equity_figure, factor_heatmap
     from .simulation import run_simulation
 
     if panels is None:
@@ -265,8 +265,8 @@ def cmd_daily(args) -> None:
     import json
     import time
 
-    from .calendar import market_session
     from .daily import update_daily
+    from .calendar import market_session
     from .pipeline import build_panels
     from .universe import load_universe_cached
 

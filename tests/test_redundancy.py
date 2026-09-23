@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from ashare_quant.research.redundancy import factor_correlation, pca_redundancy
 
 

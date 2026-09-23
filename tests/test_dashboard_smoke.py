@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+
 PROJ = Path(__file__).resolve().parents[1]
 
 # 只能放在全局 [theme]、放进 [theme.light]/[theme.dark] 不生效的键。

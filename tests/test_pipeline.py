@@ -2,7 +2,6 @@ import json
 
 import pandas as pd
 import pytest
-
 from ashare_quant.cache import ParquetStore
 from ashare_quant.config import Config
 from ashare_quant.pipeline import build_panels, download_universe
@@ -234,7 +233,7 @@ def test_panel_cache_rejects_legacy_collapsed_cache(tmp_path):
     pd.Series([3000.0] * 11, index=dates, name="close").to_frame("close").to_parquet(
         cache / "index_close.parquet")
     # 手工伪造一份"看起来有效"的 meta（绕过写入侧守卫，模拟旧版本产物）
-    from ashare_quant.pipeline import _manifest_fingerprint, _source_signature
+    from ashare_quant.pipeline import (_manifest_fingerprint, _source_signature)
     (cache / "meta.json").write_text(json.dumps({
         "index_symbol": "sh000300",
         "fingerprint": _manifest_fingerprint(store.read_manifest()),

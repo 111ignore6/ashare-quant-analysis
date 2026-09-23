@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from typing import Callable
 
 import pandas as pd
 
 from .ops import winsorize_zscore_np
+
 
 _FACTOR_REGISTRY: dict[str, Callable] = {}
 

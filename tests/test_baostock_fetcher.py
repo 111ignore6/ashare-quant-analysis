@@ -1,5 +1,4 @@
 import pandas as pd
-
 from ashare_quant.fetchers.baostock_fetcher import rows_to_frame, to_baostock_code
 
 

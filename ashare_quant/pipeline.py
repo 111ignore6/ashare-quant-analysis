@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
@@ -49,7 +49,7 @@ def _fetch_one(code: str, cfg: Config, store: ParquetStore, fetcher, fallback=No
                 return "no_data"
             store.append(code, df, update_manifest=update_manifest)
             return "ok"
-        except Exception:  # noqa: BLE001 逐只抓取：单只失败只影响该只，需退到重试/备源
+        except Exception:
             if attempt == max(1, cfg.retry) - 1:
                 return "failed"
             time.sleep(1)
@@ -60,7 +60,7 @@ def download_universe(codes: list[str], store: ParquetStore, cfg: Config,
                       fetcher=None, universe_name: str = "csi300",
                       progress_every: int = 100, fallback_fetcher=None) -> dict:
     if fetcher is None:
-        from .fetchers import resolve_fallback_fetchers, resolve_fetchers
+        from .fetchers import resolve_fetchers, resolve_fallback_fetchers
         fetcher, _, _ = resolve_fetchers(cfg)
         fallback = resolve_fallback_fetchers(cfg)
     else:

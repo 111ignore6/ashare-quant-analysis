@@ -152,12 +152,12 @@ def run_screening(close: pd.DataFrame, volume: pd.DataFrame,
                                              top_n=top_n, costs=costs)
         keep = m["sharpe"] > 0 and m["max_drawdown"] > max_drawdown_floor
         beats = m["sharpe"] > bm["sharpe"]
-        reason = (f"样本外夏普 {m['sharpe']:.2f} > 0 且回撤可控"
-                  if keep else f"样本外夏普 {m['sharpe']:.2f} <= 0 或回撤过深")
+        reason = ("样本外夏普 %.2f > 0 且回撤可控" % m["sharpe"]
+                  if keep else "样本外夏普 %.2f <= 0 或回撤过深" % m["sharpe"])
         if keep and not beats:
-            reason += f"（未跑赢等权全市场基准 {bm['sharpe']:.2f}，市场强势期集中选股普遍跑输）"
+            reason += "（未跑赢等权全市场基准 %.2f，市场强势期集中选股普遍跑输）" % bm["sharpe"]
         elif keep:
-            reason += f"（跑赢等权全市场基准 {bm['sharpe']:.2f}）"
+            reason += "（跑赢等权全市场基准 %.2f）" % bm["sharpe"]
         rows.append({"model": name, "params": str(params), "sharpe": m["sharpe"],
                      "max_drawdown": m["max_drawdown"], "keep": keep, "reason": reason})
     return pd.DataFrame(rows)

@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from ashare_quant.research.regimes import state_forward_returns, volatility_regimes
 
 

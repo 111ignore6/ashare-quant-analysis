@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-
-from ashare_quant.report.html_report import build_html_report, drawdown_figure, equity_figure, factor_heatmap
+from ashare_quant.report.html_report import (build_html_report, drawdown_figure,
+                                             equity_figure, factor_heatmap)
 
 
 def _returns():

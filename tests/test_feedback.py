@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from ashare_quant.feedback.log import AdjustmentLog
 from ashare_quant.feedback.rotation import rotate_weights
 

@@ -8,10 +8,9 @@
 
 from __future__ import annotations
 
-import threading
-
 import numpy as np
 import pandas as pd
+import threading
 
 _COLS = ["open", "high", "low", "close", "volume", "amount"]
 _tls = threading.local()
@@ -63,9 +62,7 @@ def _qfq_adjust(bars: pd.DataFrame, xdxr: pd.DataFrame) -> pd.DataFrame:
         # xdxr 里混有大量"公告日/股东大会日"行（分红送配字段全为 NaN），
         # 必须按 NaN→0 处理；若用 float(NaN or 0) 会得到 NaN（NaN 为真值），
         # 随后 after=NaN 会把该事件之前全部历史因子乘成 NaN。
-        # 同上：把 row 显式绑成默认参数（B023）。_num 只在本次迭代内被调用，
-        # 但绑定后不依赖"调用点必须在本轮内"这个隐含前提。
-        def _num(key: str, row=row) -> float:
+        def _num(key: str) -> float:
             v = row.get(key)
             return float(v) if v is not None and pd.notna(v) else 0.0
 
@@ -131,7 +128,7 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
         if xdxr is None:
             try:
                 xdxr = client.xdxr(symbol=code)
-            except Exception:  # noqa: BLE001 北交所/复权信息缺失时按原价返回
+            except Exception:  # noqa: BLE001（北交所/复权信息缺失时按原价返回）
                 xdxr = pd.DataFrame()
             _XDXR_CACHE[symbol] = xdxr
         bars = _qfq_adjust(bars, xdxr)

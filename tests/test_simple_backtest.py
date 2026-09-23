@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from ashare_quant.backtest.simple import monthly_rebalance_dates, simple_topn_returns
 
 
@@ -83,10 +82,10 @@ def test_walk_forward_ml_evaluate_accepts_and_applies_costs():
     y = pd.Series(0.0, index=X.index)
 
     class _Flip:
-        def fit(self, X_, y_):
+        def fit(self, X_, y_):  # noqa: N803
             return self
 
-        def predict(self, X_):
+        def predict(self, X_):  # noqa: N803
             return X_["f1"].to_numpy()
 
     folds = [(idx[:100], idx[100:])]

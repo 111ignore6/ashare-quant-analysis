@@ -1,14 +1,9 @@
 import numpy as np
 import pandas as pd
-
+from ashare_quant.ml.features import build_dataset
+from ashare_quant.ml.features import (load_feature_cache, load_or_build_dataset,
+                                      panel_fingerprint, save_feature_cache)
 import ashare_quant.ml.features as features_mod
-from ashare_quant.ml.features import (
-    build_dataset,
-    load_feature_cache,
-    load_or_build_dataset,
-    panel_fingerprint,
-    save_feature_cache,
-)
 
 
 def _market():

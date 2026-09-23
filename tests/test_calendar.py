@@ -1,6 +1,6 @@
 import pandas as pd
-
-from ashare_quant.calendar import TradingCalendar, drop_intraday_today, market_session
+from ashare_quant.calendar import (TradingCalendar, drop_intraday_today,
+                                   market_session)
 
 
 def test_window_and_contains():

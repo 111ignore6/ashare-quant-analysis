@@ -38,7 +38,7 @@ class SciVerseClient:
 
     def __init__(self) -> None:
         env = os.environ.copy()
-        token = env.get("SCIVERSE_API_TOKEN") or self._token_from_legacy_config()
+        token = env.get("SCIVERSE_API_TOKEN") or self._token_from_codex_config()
         if not token:
             raise RuntimeError(
                 "未找到 SCIVERSE_API_TOKEN：请设置环境变量，"
@@ -56,7 +56,7 @@ class SciVerseClient:
         self._init()
 
     @staticmethod
-    def _token_from_legacy_config() -> str | None:
+    def _token_from_codex_config() -> str | None:
         cfg_path = os.path.expanduser("~/.codex/config.toml")
         try:
             with open(cfg_path, encoding="utf-8") as fh:
@@ -74,7 +74,7 @@ class SciVerseClient:
         self._call("initialize", {
             "protocolVersion": "2025-03-26",
             "capabilities": {},
-            "clientInfo": {"name": "ashare-quant-research", "version": "0.1"},
+            "clientInfo": {"name": "codex-research", "version": "0.1"},
         })
         self._notify("notifications/initialized", {})
 
@@ -90,7 +90,7 @@ class SciVerseClient:
                 continue
             try:
                 msg = json.loads(line)
-            except Exception:  # noqa: BLE001 服务端会往 stdout 混非 JSON 日志行，跳过即可
+            except Exception:
                 continue
             if msg.get("id") == want:
                 return msg
@@ -118,7 +118,7 @@ class SciVerseClient:
         if text:
             try:
                 return json.loads(text)
-            except Exception:  # noqa: BLE001 工具可能返回纯文本而非 JSON，降级为原文
+            except Exception:
                 return {"raw_text": text}
         return result
 

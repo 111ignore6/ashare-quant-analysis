@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from importlib.metadata import entry_points
+from typing import Callable
 
 import numpy as np
+
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.neighbors import KNeighborsRegressor
@@ -11,6 +12,7 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
+
 
 _REGISTRY: dict[str, Callable] = {}
 _PLUGINS_LOADED = False

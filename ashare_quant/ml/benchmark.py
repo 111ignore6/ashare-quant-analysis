@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 
 from ..backtest.metrics import metrics_from_returns
-from ..backtest.simple import DEFAULT_COSTS, monthly_rebalance_dates, simple_topn_returns
+from ..backtest.simple import (DEFAULT_COSTS, monthly_rebalance_dates,
+                                    simple_topn_returns)
 from ..models.candidates import LowVolModel, MomentumModel, MultiFactorModel, ReversalModel
 from ..research.factor_stats import cross_sectional_ic, forward_returns
 from ..research.factors import compute_factors, winsorize_zscore

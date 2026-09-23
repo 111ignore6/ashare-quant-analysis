@@ -1,16 +1,10 @@
 
 import pandas as pd
 
-from ashare_quant.portfolio import (
-    account_basis,
-    append_decision,
-    build_trade_ledger,
-    equity_curve,
-    load_history,
-    monthly_returns_table,
-    recompute_account,
-    update_portfolio,
-)
+from ashare_quant.portfolio import (account_basis, append_decision,
+                                    build_trade_ledger, equity_curve,
+                                    load_history, monthly_returns_table,
+                                    recompute_account, update_portfolio)
 
 
 def _close():

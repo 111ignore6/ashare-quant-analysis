@@ -23,6 +23,4 @@ streamlit-autorefresh>=1.0
 
 # 开发
 pytest>=8.0
-# ruff 钉小版本：0.16 改过默认规则集，不钉的话「全绿」会随上游发布漂移。
-# 规则集在 pyproject.toml 的 [tool.ruff] 里显式声明。
-ruff>=0.16,<0.17
+ruff>=0.4

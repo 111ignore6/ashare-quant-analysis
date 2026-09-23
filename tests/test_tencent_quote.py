@@ -70,7 +70,7 @@ def test_fetch_quote_bars_builds_single_row_frames(monkeypatch):
             self.encoding = "gbk"
 
     class _Session:
-        def get(self, url, timeout=None):
+        def get(self, url, timeout=None):        # noqa: ARG002
             assert "sh688525" in url and "sh600000" in url
             return type("R", (), {"status_code": 200, "encoding": "gbk", "text": REAL})()
 

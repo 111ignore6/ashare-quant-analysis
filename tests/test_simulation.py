@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 from ashare_quant.models.candidates import MomentumModel, ReversalModel
 from ashare_quant.simulation import run_simulation
 
