@@ -1,6 +1,8 @@
 # 现代模型调研与首批落地（2026-08-11）
 
 > 模拟研究，仅用于数据分析与学习，不构成投资建议。
+>
+> ⚠️ 口径：本文中的「生产决策」指**模拟盘每日决策路径**，**不是真实资金交易** —— 本项目全程模拟，不接任何交易通道。
 
 ## 结论摘要
 
@@ -81,10 +83,10 @@
 - `dashboard.py`：新模型中文名映射。
 - `tests/test_models.py`：新模型注册与可拟合回归测试。
 
-> 注意：以上为研究评测，**每日实盘决策仍用原 6 模型**（lgbm/histgb/rf/svm/
+> 注意：以上为研究评测，**每日生产决策仍用原 6 模型**（lgbm/histgb/rf/svm/
 > knn/linear）；是否把新模型纳入正式决策待你确认后执行。
 
-## 第二轮：自研模型批量落地 + 实盘切换（2026-08-11 晚）
+## 第二轮：自研模型批量落地 + 生产决策切换（2026-08-11 晚）
 
 ### 新增模型（全市场 walk-forward 复测）
 
@@ -102,7 +104,7 @@
 | mlp_deep / pls / enet | ≤1.06 夏普 | | | | | 数据量下深网/线性类不敌树模型 |
 | lgbm（旧主力） | 65.9% | 2.75 | -8.0% | 86.7% | 0.096 | 保留 |
 
-### 已切换实盘（config.yaml `models` 字段，新字段）
+### 已切进生产决策路径（config.yaml `models` 字段，新字段）
 
 ```yaml
 models: [lgbm, xgb, rank_lgb, huber_lgb, risk_aware_lgb, temporal_decay_lgb]
@@ -113,7 +115,7 @@ models: [lgbm, xgb, rank_lgb, huber_lgb, risk_aware_lgb, temporal_decay_lgb]
   改为各模型预测**中位数**（展示用），避免 rank 分数量纲污染"预期收益"。
 - 已重训并生成 08-11 新决策（models 6 个，50 只）；账户累计仍 -1.40%
   （08-11 收盘口径，新持仓自明日开始体现收益）。
-- 旧 6 模型（svm/knn/linear/mlp/histgb/rf 中的弱项）退出实盘但保留注册表，
+- 旧 6 模型（svm/knn/linear/mlp/histgb/rf 中的弱项）退出生产决策池但保留注册表，
   可在 `算法对比` 页继续查看。
 
 ### TabPFN v2：受阻

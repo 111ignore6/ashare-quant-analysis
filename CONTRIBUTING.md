@@ -15,11 +15,18 @@
 ## 提交前必须全绿
 
 ```bash
-python -m pytest tests/          # 期望：213 passed（数字会随功能增加而变）
+python -m pytest tests/          # 期望：221 passed（数字会随功能增加而变）
 python -m ruff check .           # 期望：All checks passed!
 ```
 
 项数以 `python -m pytest tests/ --collect-only -q` 的**实测**为准，不要照抄本文档的数字。
+
+> ⚠️ **ruff 必须装对版本**：规则集在 `pyproject.toml` 的 `[tool.ruff]` 里**显式声明**，
+> ruff 本体钉在 `>=0.16,<0.17`。**不要把 `select` 删掉改成依赖默认值** ——
+> 2026-09-23 真出过事：仓库当时没有任何 ruff 配置，而 ruff 0.16 扩大了默认规则集，
+> 于是同一个 commit **本地（0.15）全绿、CI（0.16）红 179 项**。
+> 一条标准如果没被写下来，它的含义就会随上游发布静默漂移。
+> 升级 ruff 时请同时改 `pyproject.toml` 与 `.github/workflows/ci.yml`，并重跑全量检查。
 
 ## 判据设计纪律（**改代码前必读**）
 

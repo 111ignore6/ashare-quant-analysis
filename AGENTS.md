@@ -264,8 +264,8 @@ A 股全市场量化模拟研究系统：多源行情缓存（Parquet）→ 特�
   - ⚠️ **`New-ScheduledTaskTrigger -Weekly` 会重建触发器，`StartBoundary` 会被改成"执行当天 16:05"**：
     2026-09-16 那次更新后它从 `2026-08-27T16:05` 变成 `2026-09-16T16:05`。触发时间不变、
     下次运行仍是下一个工作日 16:05，但**对账时会看到这个差异**，别以为是被人改过。
-    回退依据：更新前的原始 XML 已存档在
-    `D:/aiuser/codexfile/softdevelop/projects/.dsh-prod-backup-20260916/AshareQuantDaily.BEFORE.xml`，
+    回退依据：更新前的原始 XML 已存档到仓库外的备份目录
+    （`<备份目录>/AshareQuantDaily.BEFORE.xml`），
     回退 = `Register-ScheduledTask -Xml (Get-Content <该文件> -Raw) -TaskName 'AshareQuantDaily' -Force`。
 - **`daily` 的退出码是"数据侧故障"唯一的对外信号（2026-09-18 新增，`cli.EXIT_DATA_FAILURE = 2`）**：
   约定 `0` = 正常（含"确实没有新交易日"这种非故障空转）、`2` = 数据侧故障
@@ -383,6 +383,23 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
 - **自述指标必须与实测对撞，不能自证**：`update_stats.json` 的 `healthy=true` 与仪表盘的
   `数据完整率 3.90%` 互相矛盾了整整一个交易日才被发现。验收里应有一条硬断言，例如
   `stats["stocks_behind"] == 用 parquet 元数据统计法算出的实测落后只数`。
+- **判据的标准必须写进仓库，不能靠工具的默认值（2026-09-23 事故）**：
+  本仓库当时**没有任何 ruff 配置**，`ruff check .` 一直在用 ruff 的默认规则集；
+  而 **ruff 0.16 扩大了默认集**，于是同一个 commit、同一份代码：
+  **本地（ruff 0.15.13）→ `All checks passed!`；CI（ruff 0.16.8）→ `Found 179 errors.`**
+  （CI 里写的是裸 `pip install ruff`，每次都会装最新版）。
+  这和上面那条「自述指标不能自证」是**同一类错误**：一条标准如果没被写下来，
+  它的含义就会随上游发布**静默漂移** —— "全绿"变成了"取决于你装的是哪个 ruff"。
+  修法：`pyproject.toml` 新增 `[tool.ruff]` **显式声明 `select`**，
+  并把 ruff 钉在 `>=0.16,<0.17`（`requirements.txt`、dev extra、CI 三处一致）。
+  **选规则集的依据来自代码本身**：仓库里本来就有 26 处 `noqa: BLE001`，
+  说明作者一直按"要检查盲 except"写 —— 不选 `BLE` 反而会让那些 noqa 变成死注释
+  （`RUF100 unused-noqa` 正是这么把它暴露出来的）。
+  顺带修掉的真问题：`mootdx_fetcher` 里一处 noqa 写成 `# noqa: BLE001（中文说明）`，
+  **全角括号紧跟在规则码后面会让 ruff 无法解析该指令**（一直有 warning，没人看）；
+  以及 3 处 B023（闭包捕获循环变量）—— 实测**当前是安全的**（函数只在同一轮迭代内调用），
+  但已显式绑成默认参数，免得将来有人把它存起来延后调用时静默拿到下一轮的值。
+  ⚠️ 教训：**"本地全绿"不是证据，除非你能说出绿的是哪个版本、哪套规则。**
 
 ## 当前状态（2026-09-16）
 
