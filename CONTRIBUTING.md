@@ -15,7 +15,7 @@
 ## 提交前必须全绿
 
 ```bash
-python -m pytest tests/          # 期望：221 passed（数字会随功能增加而变）
+python -m pytest tests/          # 期望：224 passed（数字会随功能增加而变）
 python -m ruff check .           # 期望：All checks passed!
 ```
 

@@ -32,15 +32,47 @@
 完整清单（含仍未修复的算法问题、未验证事项、以及本项目坚持的判据纪律）
 见 **[`docs/HONESTY.md`](docs/HONESTY.md)**。
 
-## 运行
+## 快速开始（5 分钟，跨平台）
+
+> **前置**：Python ≥ 3.11。以下命令在 Windows / Linux / macOS 上通用。
 
 ```bash
-pip install -r requirements.txt            # 或 pip install -e .（标准包安装）
-python -m ashare_quant.cli fetch --universe csi300 --years 3   # 下载沪深300数据
-python -m ashare_quant.cli research                            # 生成研究报告
+# 1) 装依赖 —— 二选一，注意两者不等价
+pip install -r requirements.txt        # 推荐：一次装齐（含仪表盘 + 测试工具）
+# pip install -e ".[dashboard]"        # 若要以「包」方式安装，必须带 [dashboard]
+#                                      # 裸 pip install -e . 不含 streamlit，仪表盘起不来
+
+# 2) 下载沪深300（约 300 只，实测 ~1 分钟）
+python -m ashare_quant.cli fetch --universe csi300 --years 3
+
+# 3) 生成研究报告
+python -m ashare_quant.cli research
+
+# 4) 打开仪表盘 → http://localhost:8501
+python -m streamlit run dashboard.py
 ```
 
-## 一键启动（日常使用）
+### ⚠️ 三个新手最容易踩的坑
+
+1. **`fetch --universe csi300` 与 `config.yaml` 的 `universe_mode: all` 不是一回事。**
+   快速上手只下 288 只；但 `daily` 读的是 `config.yaml`，默认 `universe_mode: all`
+   —— 于是第一次跑 `daily` 会去拉**全市场约 5360 只**（首次约 15~25 分钟，
+   之后才是 README 后面说的"增量几十秒"）。
+   **想保持小样本**：把 `config.yaml` 的 `universe_mode` 改成 `csi300`，
+   并让 `data_root` 指向同一目录。
+2. **仓库自带的是维护者的演示产物。** `docs/simulation-all/` 里的
+   决策/净值/报告是维护者自己跑出来的（`data/` 不入库，所以新克隆是空的）。
+   在你跑完自己的 `fetch` + `daily` 之前，仪表盘显示的是**别人的模拟持仓**，
+   不是你的 —— 这不是 bug，但别误读。
+3. **数据来自新浪/腾讯/通达信的公开接口**，会被限流（HTTP 501 反爬页）或临时不可达。
+   遇到失败先重试；`daily` 在数据侧故障时会**拒绝推进并返回退出码 2**
+   （不会在旧数据上出决策）。
+
+## 一键启动（Windows 专用便利层）
+
+> 下面这段**只在 Windows 上可用**（`.bat` + PowerShell）。
+> Linux/macOS 用户请用上面的「快速开始」四条命令，功能完全一致，
+> 只是没有这层便利封装（计划任务、后台托管、自动开浏览器）。
 
 **最省事**：双击根目录 `启动系统.bat` —— 自动做每日增量更新 → 启动仪表盘 → 打开浏览器。
 首次使用（还没有数据）会提示先用 `start.bat` 下载。

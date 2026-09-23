@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 import pandas as pd
@@ -15,7 +16,9 @@ from .universe import load_universe
 # `daily` 的退出码约定（2026-09-18 新增）：
 #   0 = 正常（含"确实没有新交易日"这种非故障的空转）
 #   2 = 数据侧故障：主备源全空 / 个股大面积没跟上 / 面板横截面塌缩 —— 已主动**不**出决策
-#   1 = 未捕获异常（traceback，由 Python 自己给）
+#   1 = 未捕获异常（2026-09-23 起由 main() 的顶层兜底打印"失败说明 + 完整堆栈"后返回，
+#       不再是裸 traceback；约定本身未变）
+#   130 = 用户 Ctrl-C 中断（128 + SIGINT，沿用 shell 惯例）
 # 为什么要有 2：09-17 16:05 的计划任务三个指数源全空、数据停在 09-16，
 # 而 `Get-ScheduledTaskInfo` 的 LastTaskResult 仍是 0（旧代码只打印 ‼️ 就 return None）。
 # 失败必须能被操作系统看见，否则"计划任务一切正常"会和仪表盘一样撒同一个谎。
@@ -596,7 +599,28 @@ def main(argv=None) -> None:
     dc.add_argument("--retrain", action="store_true")
     dc.set_defaults(func=cmd_decision)
     args = p.parse_args(argv)
-    code = args.func(args)
+    # 顶层兜底（2026-09-23 新增）：此前 args.func(args) 裸调，任何网络/数据源异常
+    # 都以一段没有上下文的原始 traceback 结束 —— 新用户第一次跑 `daily` 撞到
+    # 数据源限流时，看到的是一屏 requests 栈，不知道该干什么。
+    # 现在补一句"这是什么 + 常见原因 + 下一步"，同时**保留完整堆栈**（开源项目里
+    # 藏掉堆栈会让 bug 报告变难，不能为了好看牺牲可诊断性）。
+    try:
+        code = args.func(args)
+    except KeyboardInterrupt:
+        print("\n已中断。", file=sys.stderr)
+        raise SystemExit(130) from None
+    except Exception as exc:  # noqa: BLE001 顶层兜底：任何子命令异常都要变成可读的失败
+        print(f"\n‼️ 运行失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+        print("\n常见原因：", file=sys.stderr)
+        print("  1. 数据源不可达或被限流（本项目依赖新浪/腾讯/通达信的公开接口，"
+              "偶发 HTTP 501 反爬页是已知现象，稍后重试通常可恢复）", file=sys.stderr)
+        print("  2. 还没下载数据 —— 先跑 "
+              "`python -m ashare_quant.cli fetch --universe csi300 --years 3`",
+              file=sys.stderr)
+        print("  3. 依赖没装齐 —— `pip install -r requirements.txt`", file=sys.stderr)
+        print("\n完整堆栈：", file=sys.stderr)
+        traceback.print_exc()
+        raise SystemExit(1) from None
     # 子命令返回非 0 表示"数据侧故障、已主动不出决策"（见 EXIT_DATA_FAILURE）。
     # 计划任务据此把 LastTaskResult 记成失败，失败才不会被"成功"掩盖。
     if isinstance(code, int) and code != 0:

@@ -349,7 +349,7 @@ python -m ashare_quant.cli fetch     # 全量下载（幂等，已有则跳过�
 python -m ashare_quant.cli simulate  # 模拟盘回测
 python -m ashare_quant.cli decision  # 训练/加载模型 + 今日决策
 python -m streamlit run dashboard.py # 仪表盘（端口 8501）
-python -m pytest tests/ -q           # 全量测试（当前 221 项，必须全绿再提交）
+python -m pytest tests/ -q           # 全量测试（当前 224 项，必须全绿再提交）
 python -m ruff check .               # 静态检查
 python scripts/audit_qfq_anchor.py   # 换数据源后审计前复权锚点一致性（--fix 可整段重建）
 python scripts/fix_volume_unit.py    # 成交量量纲体检（dry-run；应始终报"需要修复 0 只"）
@@ -400,6 +400,27 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
   以及 3 处 B023（闭包捕获循环变量）—— 实测**当前是安全的**（函数只在同一轮迭代内调用），
   但已显式绑成默认参数，免得将来有人把它存起来延后调用时静默拿到下一轮的值。
   ⚠️ 教训：**"本地全绿"不是证据，除非你能说出绿的是哪个版本、哪套规则。**
+- **`requirements.txt` 必须保持纯 ASCII（2026-09-23 部署体检发现，是真正的开箱阻断项）**：
+  pip 解码 requirements 文件用的是**系统 locale 编码**，不是 UTF-8
+  （pip 的 `auto_decode` 只认 BOM，否则用 `locale.getpreferredencoding()`）。
+  中文 Windows 的 locale 是 **cp936/GBK**，于是带中文注释的 requirements.txt 会让
+  **README 的第一条命令**直接失败：
+  `UnicodeDecodeError: 'gbk' codec can't decode byte 0xa1 in position 6`。
+  这个坑**只影响中文用户**，英文环境永远复现不出来 —— 而本项目的受众主要就是中文用户。
+  实测：`file requirements.txt` = UTF-8 无 BOM + `getpreferredencoding()` = cp936。
+  修法二选一，**都实测通过**：① 加 UTF-8 BOM（pip 先读 BOM）；
+  ② 注释改纯 ASCII（**采用这条**，无 BOM 副作用、全平台无歧义）。
+  中文说明写在 README/AGENTS.md 里，不要写进 requirements.txt。
+  同类风险：**任何被工具按"系统 locale"读取的文本文件**（不只是 requirements.txt）。
+- **`pip install -e .` ≠ `pip install -r requirements.txt`（同次体检）**：
+  前者不含 `[project.optional-dependencies] dashboard` 里的 streamlit，
+  于是"按文档装完却起不来仪表盘"。要以包方式装必须写
+  `pip install -e ".[dashboard]"`。
+- **`config.yaml` 的 `universe_mode: all` 与 README 的 csi300 快速上手不是一回事（同次体检）**：
+  照 README 走完（288 只）再跑 `daily`，实测它去拉**全市场 5360 只**
+  （`universe.json` 的 `mode` 是 `all`，parquet 从 288 涨到 2182 还在继续），
+  首次 15~25 分钟 —— README 里"每日增量约 37 秒"对这批用户不成立。
+  已在 README 顶部写成显式警告。
 
 ## 当前状态（2026-09-16）
 
@@ -495,8 +516,9 @@ python scripts/audit_volume_integrity.py  # 逐 (股票,日期) 成交量完整�
   `LastTaskResult=0`、`NextRunTime=2026-09-17 16:05:05`、`NumberOfMissedRuns=0`。
   日志改 UTF-8 的新命令**已于 2026-09-16 原地更新进任务**（`Set-ScheduledTask`，无空窗），
   因此 **09-17 16:05 那一次就是首次以 UTF-8 写日志**；跑完后按「已知问题」2 的判据 B 验一次。
-- **测试**：**221 项全绿**（`python -m pytest tests/` 实测 `221 passed`）、`python -m ruff check .` 全绿。
-  演进：126 →（09-16）155 →（09-18 第一轮）179 →（09-18 第二轮）203 →（09-18 第三轮）**221**；
+- **测试**：**224 项全绿**（`python -m pytest tests/` 实测 `224 passed`）、`python -m ruff check .` 全绿。
+  演进：126 →（09-16）155 →（09-18 第一轮）179 →（09-18 第二轮）203 →（09-18 第三轮）221
+  →（09-23 部署体检）**224**（新增 3 项：CLI 顶层兜底/中断/退出码透传）；
   ⚠️ 本节此前写「212 项」，而同一段列的演进又止于 203 —— **自相矛盾且都过期**。
   项数以 `python -m pytest tests/ --collect-only -q` 的**实测**为准，别照抄数字。
   新增集中在 daily 正确性/批量快路径、特征与面板缓存判据、抓取源链、成交量审计、
