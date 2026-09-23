@@ -128,7 +128,11 @@ def fetch_daily(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Da
         if xdxr is None:
             try:
                 xdxr = client.xdxr(symbol=code)
-            except Exception:  # noqa: BLE001（北交所/复权信息缺失时按原价返回）
+            # 说明：北交所/复权信息缺失时按原价返回。
+            # ⚠️ noqa 的规则码后面必须紧跟空白或行尾：这里原先在规则码后直接跟了
+            # 全角括号写中文说明，导致 ruff **无法解析该指令** —— 它一直是一条
+            # 静默失效的 noqa（每次运行都打 warning，没人看）。说明已移到本注释。
+            except Exception:  # noqa: BLE001
                 xdxr = pd.DataFrame()
             _XDXR_CACHE[symbol] = xdxr
         bars = _qfq_adjust(bars, xdxr)
